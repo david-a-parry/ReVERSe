@@ -13,6 +13,8 @@ from parse_vcf import VcfReader
 from vase.var_by_region import VarByRegion
 from vase.gnomad_filter import GnomadFilter
 from vase.sample_filter import GtFilter
+from vase.ped_file import PedFile
+from Bio import bgzf
 
 logger = logging.getLogger("gnomAD Assoc")
 logger.setLevel(logging.INFO)
@@ -21,6 +23,8 @@ ch.setLevel(logging.INFO)
 formatter = logging.Formatter(
        '[%(asctime)s] %(name)s - %(levelname)s - %(message)s')
 ch.setFormatter(formatter)
+prog_string = ''
+g_columns = ['alt', 'non_alt', 'P', 'OR',]
 
 class CovAnalyzer(object):
     """
@@ -158,8 +162,16 @@ class CovAnalyzer(object):
 def get_options():
     parser = argparse.ArgumentParser(description='''
             Do a crude association test against a gnomAD VCF file.''')
-    parser.add_argument("vcf", help='''Input VCF file''')
-    parser.add_argument("gnomad", help='''gnomAD VCF file''')
+    parser.add_argument("-i", "--vcf_input", "--vcf", required=True,
+                        help='Input VCF file')
+    parser.add_argument("-g", "--gnomad", required=True, help='gnomAD VCF file'
+                        )
+    parser.add_argument("-t", "--table_output", help='''Table output of
+                        variants, counts and p-values. Default=STDOUT''')
+    parser.add_argument("-v", "--vcf_output", help='''VCF output. If provided
+                        all variants will be written to this file with counts
+                        and p-values annotated. If the filename ends with '.gz'
+                        it will automatically compressed with bgzip.''')
     parser.add_argument("-c", "--coverage_dir", help='''Coverage directory as
                         downloaded from gnomAD containing one or more coverage
                         files. Coverage files must be sorted, bgzip compressed
@@ -195,6 +207,13 @@ def get_options():
     parser.add_argument("--max_one_per_sample", action='store_true',
                         help='''Only count one allele per sample irrespective
                         of whether they are homozygous or heterozygous.''')
+    parser.add_argument("--ped", help='''PED file detailing family membership
+                        and affected status of individuals. Only individuals
+                        with an affected status (2) will be counted and only a
+                        single member will be counted per family. For variants
+                        where any affected family member is confidently called
+                        as homozygous reference a count of 0 will be given even
+                        if other members carry the variant allele.''')
     return parser
 
 def get_gnomad_pops(vcf):
@@ -217,8 +236,118 @@ def get_gnomad_pops(vcf):
         raise RuntimeError("No gnomAD populations found for VCF input!")
     return set(pops)
 
+def _one_individual_per_fam(gts, gt_filter, allele, families):
+    '''
+        Return a single affected individual from each family on the
+        condition that all carry the ALT allele (or are not confident
+        calls).
+
+        Args:
+            gts:    parsed_gts from VcfRecord
+
+            gt_filter:
+                    GtFilter from vase.sample_filter
+
+            allele: index of ALT allele to test
+
+            families:
+                    dict of family ID to affected members
+    '''
+    indvs = []
+    for f,members in families.items():
+        if len(members) == 1:
+            indvs.append(members[0])
+        else:
+            a_counts = [gts['GT'][s].count(allele) if
+                        gt_filter.gt_is_ok(gts, s, allele) else -1 for s in
+                        members]
+            if all(a_counts) and any(x > 0 for x in a_counts):
+                #all carry variant or are no-call, but at least one is not a
+                # no-call. If homs and hets present add the first het
+                i = a_counts.index(min((x for x in a_counts if x > 0)))
+                indvs.append(members[i])
+    return indvs
+
+def write_record(fh, record, results, pops):
+    '''
+        Annotate VcfRecord with counts and Fisher's test results from
+        comparison with gnomAD.
+
+        Args:
+            fh: output filehandle
+
+            record:
+                input VcfRecord
+
+            results:
+                list with results (one per-allele) from process_variant
+                method. Each per-allele result should contain the ALT
+                allele counts from input, REF allele counts from input,
+                and for each population the ALT allele counts, REF allele
+                counts, p-value and odds-ratio.
+
+            pops:
+                The name of each population in the same order as it
+                appears in each result.
+    '''
+    inf = defaultdict(list)
+    for i in range(len(record.ALLELES)-1):
+        inf['gassoc_cohort_alt'].append(results[i][0])
+        inf['gassoc_cohort_non_alt'].append(results[i][1])
+        for j in range(len(pops)):
+            s = j * 4 + 2
+            for f, r in zip(["gassoc_" + pops[j] + "_" + x for x in g_columns],
+                            results[i][s:s+4]):
+                inf[f].append(r)
+    record.add_info_fields(inf)
+    fh.write(str(record) + "\n")
+
+def write_vcf_header(vcf, fh, pops):
+    vcf.header.add_header_field(name=__name__,
+                               string='"' + str.join(" ", sys.argv) + '"')
+    inf = {'gassoc_cohort_alt':     {'Number': 'A', 'Type': 'Integer',
+                                     'Description':
+                                     'ALT allele counts in cohort'},
+           'gassoc_cohort_non_alt': {'Number': 'A', 'Type': 'Integer',
+                                     'Description':
+                                     'non-ALT allele counts in cohort'},
+           }
+    for p in pops:
+        for f in g_columns:
+            ftype = 'Float' if f in ['P', 'OR'] else 'Integer'
+            field_name = "gassoc_" + p + "_" + f
+            if f == 'alt':
+                desc = 'ALT allele counts for {} population'.format(p)
+            elif f == 'non_alt':
+                desc = 'non-ALT allele counts for {} population'.format(p)
+            elif f == 'P':
+                desc = 'Fisher\'s P-value for {} population vs cohort'.format(
+                    p)
+            elif f == 'OR':
+                desc = ("Odds ratio from Fisher's test for {} ".format(p) +
+                       'population vs cohort')
+            inf[field_name] = {'Number': 'A', 'Type': ftype,
+                               'Description': desc }
+    for f,d in inf.items():
+        vcf.header.add_header_field(name=f, dictionary=d, field_type='INFO')
+    fh.write(str(vcf.header))
+
+def update_progress(n, record, log=False):
+    n_prog_string = "{:,} variants processed, at {}:{}".format(n, record.CHROM,
+                                                               record.POS)
+    global prog_string
+    if log:
+        logger.info(n_prog_string)
+    else:
+        n_prog_string = '\r' + n_prog_string
+        if len(prog_string) > len(n_prog_string):
+            sys.stderr.write('\r' + ' ' * len(prog_string) )
+        sys.stderr.write(prog_string)
+    prog_string = n_prog_string
+
 def process_variant(record, gnomad_filter, p_value, pops, gts, gt_filter,
-                    cov_analyzer=None, max_one_per_sample=False,
+                    table_out, vcf_out, cov_analyzer=None,
+                    max_one_per_sample=False, families=None,
                     require_all_p_values=False):
     if cov_analyzer:
         covered = cov_analyzer.samples_at_site(record.CHROM, record.POS)
@@ -227,17 +356,27 @@ def process_variant(record, gnomad_filter, p_value, pops, gts, gt_filter,
     overlapping = gnomad_filter.get_overlapping_records(record)
     p_check = all if require_all_p_values else any
     i = 0
+    per_allele_results = []
     for allele in record.DECOMPOSED_ALLELES:
+        if allele.ALT == '*':
+            if vcf_out:
+                per_allele_results.append(['.'] * (4 * len(pops) + 2))
+            continue
         i += 1
         filt,keep,matched,annot = gnomad_filter._compare_var_values(allele,
                                                                     overlapping
                                                                    )
+        if families is not None:
+            indvs = _one_individual_per_fam(gts, gt_filter, i, families)
+        else:
+            indvs = [x for x in gts['GT']]
         if max_one_per_sample:
-            alts = sum(1 for s in gts['GT'] if gt_filter.gt_is_ok(gts, s, i)
+            alts = sum(1 for s in indvs if gt_filter.gt_is_ok(gts, s, i)
                        and i in gts['GT'][s])
         else:
-            alts= sum((gts['GT'][s].count(i)) for s in gts['GT'] if
+            alts= sum((gts['GT'][s].count(i)) for s in indvs if
                        gt_filter.gt_is_ok(gts, s, i) and i in gts['GT'][s])
+        #TODO rethink for sex chromosomes
         chroms = sum(2 for s in gts['GT'] if gt_filter.gt_is_ok(gts, s, i))
         refs = chroms - alts
         results = [allele.CHROM, allele.POS, record.ID,  allele.REF,
@@ -267,23 +406,45 @@ def process_variant(record, gnomad_filter, p_value, pops, gts, gt_filter,
                                                             total_an-total_ac)],
                                             alternative='greater')
             results.extend([total_ac, total_an - total_ac, pval, odds])
+        if vcf_out:
+            per_allele_results.append(results[5:])
         if all_pvals and p_check(x <= p_value for x in all_pvals):
-            print("\t".join((str(x) for x in results)))
+            table_out.write("\t".join((str(x) for x in results)) + "\n")
+    if vcf_out:
+        write_record(vcf_out, record, per_allele_results, pops)
 
-def main(vcf, gnomad, pops=None, samples=None, bed=None, p_value=0.05,
-         dp_cutoff=10, coverage_dir=None, cohort="Exomes", gq=0, dp=0,
-         max_dp=0, het_ab=0., hom_ab=0., require_all_p_values=False,
-         max_one_per_sample=False):
-    vcfreader = VcfReader(vcf)
+def main(vcf_input, gnomad, table_output=None, vcf_output=None, pops=None,
+         samples=None, bed=None, p_value=0.05, dp_cutoff=10, coverage_dir=None,
+         cohort="Exomes", gq=20, dp=5, max_dp=250, het_ab=0.25, hom_ab=0.95,
+         ped=None, require_all_p_values=False, max_one_per_sample=False,
+         progress_interval=1000, log_progress=False):
+    vcfreader = VcfReader(vcf_input)
+    out_fh = sys.stdout if table_output is None else open(table_output, 'w')
+    vcf_writer = None
+    if vcf_output is not None:
+        if vcf_output.endswith(('.gz', '.bgz')):
+            vcf_writer = bgzf.BgzfWriter(vcf_output)
+        else:
+            vcf_writer = open(vcf_output, 'w')
+        write_vcf_header(vcfreader, vcf_writer, pops)
     if samples is None:
-            samples = vcfreader.header.samples
+        samples = vcfreader.header.samples
     else:
         missing = [x for x in samples if x not in vcfreader.header.samples]
         if missing:
             sys.exit("Missing {} user specified samples".format(len(missing)) +
                      " in VCF ({}).".format(", ".join(missing)))
-    gt_filter = GtFilter(vcf, gq=gq, dp=dp, max_dp=max_dp, het_ab=het_ab,
-                              hom_ab=hom_ab)
+    families = None
+    if ped is not None:
+        pedfile = PedFile(ped)
+        samples = [aff for aff in pedfile.get_affected() if aff in samples]
+        if not samples:
+            sys.exit("No affected samples from PED in VCF\n")
+        families = defaultdict(list)
+        for fid, fam in pedfile.families.items():
+            families[fid].extend(x for x in fam.get_affected() if x in samples)
+    gt_filter = GtFilter(vcfreader, gq=gq, dp=dp, max_dp=max_dp, het_ab=het_ab,
+                         hom_ab=hom_ab)
     gt_fields = gt_filter.fields
     if bed is None:
         varstream = vcfreader
@@ -310,14 +471,19 @@ def main(vcf, gnomad, pops=None, samples=None, bed=None, p_value=0.05,
     header = ["#chrom", "pos", "id", "ref", "alt", "cases_alt", "cases_ref"]
     header.extend([x + "_alt\t" + x + "_ref\t" + x + "_p\t"  + x + "_odds" for
                    x in pops])
-    print("\t".join(header))
+    out_fh.write("\t".join(header) + "\n")
+    n = 0
     for record in varstream:
         gts = record.parsed_gts(fields=gt_fields, samples=samples)
         process_variant(record=record, gnomad_filter=gnomad_filter, pops=pops,
-                        p_value=p_value, cov_analyzer=cov_analyzer, gts=gts,
-                        gt_filter=gt_filter,
+                        table_out=out_fh, vcf_out=vcf_writer, p_value=p_value,
+                        cov_analyzer=cov_analyzer, gts=gts,
+                        gt_filter=gt_filter, families=families,
                         require_all_p_values=require_all_p_values,
                         max_one_per_sample=max_one_per_sample)
+        n += 1
+        if n % progress_interval == 0:
+            update_progress(n, record, log_progress)
 
 if __name__ == '__main__':
     argparser = get_options()
