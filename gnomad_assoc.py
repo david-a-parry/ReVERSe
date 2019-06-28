@@ -303,29 +303,29 @@ def write_record(fh, record, results, pops):
     fh.write(str(record) + "\n")
 
 def write_vcf_header(vcf, fh, pops):
-    vcf.header.add_header_field(name=__name__,
+    vcf.header.add_header_field(name="gnomad_assoc",
                                string='"' + str.join(" ", sys.argv) + '"')
     inf = {'gassoc_cohort_alt':     {'Number': 'A', 'Type': 'Integer',
                                      'Description':
-                                     'ALT allele counts in cohort'},
+                                     '"ALT allele counts in cohort"'},
            'gassoc_cohort_non_alt': {'Number': 'A', 'Type': 'Integer',
                                      'Description':
-                                     'non-ALT allele counts in cohort'},
+                                     '"non-ALT allele counts in cohort"'},
            }
     for p in pops:
         for f in g_columns:
             ftype = 'Float' if f in ['P', 'OR'] else 'Integer'
             field_name = "gassoc_" + p + "_" + f
             if f == 'alt':
-                desc = 'ALT allele counts for {} population'.format(p)
+                desc = '"ALT allele counts for {} population"'.format(p)
             elif f == 'non_alt':
-                desc = 'non-ALT allele counts for {} population'.format(p)
+                desc = '"non-ALT allele counts for {} population"'.format(p)
             elif f == 'P':
-                desc = 'Fisher\'s P-value for {} population vs cohort'.format(
-                    p)
+                desc = ('"Fisher\'s P-value for {} population vs '.format(p) +
+                        'cohort"')
             elif f == 'OR':
-                desc = ("Odds ratio from Fisher's test for {} ".format(p) +
-                       'population vs cohort')
+                desc = ('"Odds ratio from Fisher\'s test for {} '.format(p) +
+                       'population vs cohort"')
             inf[field_name] = {'Number': 'A', 'Type': ftype,
                                'Description': desc }
     for f,d in inf.items():
