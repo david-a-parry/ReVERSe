@@ -23,6 +23,61 @@ ch.setFormatter(formatter)
 prog_string = ''
 progress_interval = 1000
 
+class AssocSegregator(RecessiveFilter):
+    '''
+        Look for recessive combinations including at least one designated
+        association 'hit'
+    '''
+
+    def __init__(self, family_filter, gq=0, dp=0, max_dp=0, het_ab=0.,
+                 hom_ab=0., min_control_dp=None, max_control_dp=None,
+                 min_control_gq=None, control_het_ab=None, control_hom_ab=None,
+                 con_ref_ab=None, sv_gq=0, sv_dp=0, sv_max_dp=0,
+                 sv_het_ab=0., sv_hom_ab=0., sv_min_control_dp=None,
+                 sv_max_control_dp=0, sv_min_control_gq=None,
+                 sv_control_het_ab=None, sv_control_hom_ab=None,
+                 sv_con_ref_ab=None, min_families=1, strict=False,
+                 exclude_denovo=False, report_file=None):
+        super().__init__(family_filter, gq=gq, dp=dp, max_dp=max_dp,
+                         het_ab=het_ab, hom_ab=hom_ab,
+                         min_control_dp=min_control_dp,
+                         max_control_dp=max_control_dp,
+                         min_control_gq=min_control_gq,
+                         control_het_ab=control_het_ab,
+                         control_hom_ab=control_hom_ab, con_ref_ab=con_ref_ab,
+                         sv_gq=sv_gq, sv_dp=sv_dp, sv_max_dp=sv_max_dp,
+                         sv_het_ab=sv_het_ab, sv_hom_ab=sv_hom_ab,
+                         sv_min_control_dp=sv_min_control_dp,
+                         sv_max_control_dp=sv_max_control_dp,
+                         sv_min_control_gq=sv_min_control_gq,
+                         sv_control_het_ab=sv_control_het_ab,
+                         sv_control_hom_ab=sv_control_hom_ab,
+                         sv_con_ref_ab=sv_con_ref_ab,
+                         min_families=min_families,
+                         report_file=report_file,)
+        self.prefix = "gassoc_biallelic"
+        self.header_fields = [("gassoc_biallelic_homozygous",
+               '"Samples that carry homozygous biallelic changes ' +
+               ' parsed by {}"' .format(type(self).__name__)),
+               ("gassoc_biallelic_compound_het",
+               '"Samples that carry compound heterozygous biallelic changes ' +
+               'parsed by {}"'.format(type(self).__name__)),
+               ("gassoc_biallelic_de_novo",
+               '"Samples that carry biallelic alleles that appear to have ' +
+               'arisen de novo"'),
+                ('gassoc_biallelic_families',
+                '"Family IDs for gassoc_biallelic alleles"'),
+               ("gassoc_biallelic_features",
+               '"Features (e.g. transcripts) that contain qualifying ' +
+               'biallelic variants parsed by {}"' .format(
+                type(self).__name__)),]
+        self.annot_fields = ('homozygous', 'compound_het', 'de_novo',
+                            'families', 'features')
+
+    def process_potential_recessives(self, var_to_assoc_alleles, final=False):
+        pass
+
+
 def main(args):
     log_progress = False
     variant_cache = VariantCache()
@@ -34,7 +89,7 @@ def main(args):
     pedfile = PedFile(args.ped)
     family_filter = FamilyFilter(ped=pedfile, vcf=vcfreader,
                                  logging_level=logger.level)
-    recessive_filter = RecessiveFilter(family_filter,
+    assoc_segregator = AssocSegregator(family_filter,
                                        gq=args.gq,
                                        dp=args.dp,
                                        max_dp=args.max_dp,
@@ -78,52 +133,92 @@ def main(args):
         vcf_writer = open(args.output, 'w')
     write_vcf_header(vcfreader, vcf_writer)
     n = 0
+    var_to_hits = dict()
     for record in vcfreader:
-        pr = process_record(record, args.p_value, args.min_alleles,
-                            assoc_fields, csq_filter, no_csq_filter,
-                            recessive_filter, args.freq, freq_fields)
-        if pr:
+        segs, assocs = process_record(record, args.p_value, args.min_alleles,
+                                      assoc_fields, csq_filter, no_csq_filter,
+                                      assoc_segregator, args.freq, freq_fields)
+        if segs:
             variant_cache.add_record(record)
+            if assocs:
+                var_to_hits[variant_cache.cache[-1].var_id] = assocs
         else:
             variant_cache.check_record(record)
         if variant_cache.output_ready:
-            process_cache(variant_cache, recessive_filter, args.p_value,
-                          args.min_alleles, assoc_fields, vcf_writer)
+            process_cache(variant_cache, var_to_hits, assoc_segregator,
+                          args.p_value, args.min_alleles, assoc_fields,
+                          vcf_writer)
+            variant_cache.output_ready.clear()
+            var_to_hits = {variant_cache.cache[-1].var_id:
+                           var_to_hits[variant_cache.cache[-1].var_id]}
         n += 1
         if n % progress_interval == 0:
             update_progress(n, record, log_progress)
-    process_cache(variant_cache, recessive_filter, args.p_value,
+    process_cache(variant_cache, var_to_hits, assoc_segregator, args.p_value,
                   args.min_alleles, assoc_fields, vcf_writer, final=True)
+    variant_cache.output_ready.clear()
     if vcf_writer is not sys.stdout:
         vcf_writer.close()
 
-def process_cache(cache, recessive_filter, pval, min_alleles, assoc_fields,
-                  outfh, final=False):
-    #first check if any set of alleles segregates as recessive
-    var_id_to_seg = recessive_filter.process_potential_recessives(final=final)
-    #OrderedDict([('chr21:46357169-G/A', [<vase.family_filter.PotentialSegregant object at 0x7f2780d8f3f0>]), 
+def process_cache(cache, var_to_hits, assoc_segregator, pval, min_alleles,
+                  assoc_fields, outfh, final=False):
     if final:
         variant_cache.add_cache_to_output_ready()
-    
+    if not var_to_hits:
+        return
+    var_id_to_seg = assoc_segregator.process_potential_recessives(var_to_hits,
+                                                                  final=final)
+    if not any(x in var_to_hits for x in var_id_to_seg):
+        return
+    #OrderedDict([('chr21:46357169-G/A', [<vase.family_filter.PotentialSegregant object at 0x7f2780d8f3f0>]), 
+
 
 def process_record(record, pval, min_alleles, assoc_fields, csq_filter,
-                   hit_vep_filter, recessive_filter, freq, freq_fields):
-    remove_alleles  = [False] * (len(record.ALLELES) -1)
+                   hit_vep_filter, assoc_segregator, freq, freq_fields):
+    remove_alleles = [False] * (len(record.ALLELES) -1)
+    for i in range(1, len(record.ALLELES)):
+        if record.ALLELES[i] == '*':
+            remove_alleles[i-1] = True
     if freq_fields and freq:
         r = filter_on_existing_freq(record, freq, freq_fields)
         set_true_if_true(remove_alleles, r)
-    is_hit = is_assoc_hit(record, pval, min_alleles)
-    if is_hit:
-        r_alts, remove_csq = hit_vep_filter.filter(record)
-    else:
+    is_hit = is_assoc_hit(record, pval, min_alleles, assoc_fields)
+    if any(is_hit):
+        r_alts, h_remove_csq = hit_vep_filter.filter(record)
+        set_true_if_true(remove_alleles, r_alts)
+    if not all(is_hit):
         r_alts, remove_csq = csq_filter.filter(record)
-    set_true_if_true(remove_alleles, r_alts)
+        if any(is_hit):
+            remove_alleles = [r_alts[i] if not is_hit[i] else remove_alleles[i]
+                              for i in range(len(r_alts))]
+            remove_csq = [remove_csq[i] if not
+                          is_hit[record.CSQ[i]['alt_index']-1]
+                          else h_remove_csq[i] for i in range(len(remove_csq))]
+        else:
+            set_true_if_true(remove_alleles, r_alts)
     if all(remove_alleles) or all(remove_csq):
-        return
-    return recessive_filter.process_record(record, remove_alleles, remove_csq)
+        return False, False
+    segs = assoc_segregator.process_record(record, remove_alleles, remove_csq)
+    return segs, is_hit
 
-def is_assoc_hit(record, pval, min_alleles):
-    pass #TODO
+def is_assoc_hit(record, pval, min_alleles, assoc_fields):
+    '''
+        For each ALT allele check if they meet the requirement for an
+        enrichment hit
+    '''
+    allele_is_hit = [False] * (len(record.ALLELES) -1)
+    info = record.parsed_info(fields=['gassoc_cohort_alt'] + assoc_fields)
+    for i in range(len(record.ALLELES) - 1):
+        if info['gassoc_cohort_alt'][i] < min_alleles:
+            continue
+        is_hit = True
+        for f in assoc_fields: #require ALL fields to be <= pval
+            if info[f][i] is None or info[f][i] > pval:
+                is_hit = False
+                break
+        if is_hit:
+            allele_is_hit[i] = is_hit
+    return allele_is_hit
 
 def set_true_if_true(a, b):
     for i in range(len(a)):
