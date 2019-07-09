@@ -186,7 +186,9 @@ def process_record(record, pval, min_alleles, assoc_fields, csq_filter,
     if any(is_hit):
         r_alts, h_remove_csq = hit_vep_filter.filter(record)
         set_true_if_true(remove_alleles, r_alts)
-    if not all(is_hit):
+    if all(is_hit):
+        remove_csq = h_remove_csq
+    else:
         r_alts, remove_csq = csq_filter.filter(record)
         if any(is_hit):
             remove_alleles = [r_alts[i] if not is_hit[i] else remove_alleles[i]
@@ -207,7 +209,7 @@ def is_assoc_hit(record, pval, min_alleles, assoc_fields):
         enrichment hit
     '''
     allele_is_hit = [False] * (len(record.ALLELES) -1)
-    info = record.parsed_info(fields=['gassoc_cohort_alt'] + assoc_fields)
+    info = record.parsed_info_fields(fields=['gassoc_cohort_alt'] + assoc_fields)
     for i in range(len(record.ALLELES) - 1):
         if info['gassoc_cohort_alt'][i] < min_alleles:
             continue
@@ -255,11 +257,11 @@ def get_assoc_fields(vcf):
             sys.exit("Missing required annotation field '{}' in ".format(f) +
                      "VCF header. The gnomad_assoc.py script must be used to" +
                      " produce your input VCF before running this program.\n")
-    annots = set()
+    annots = list()
     for info in vcf.metadata['INFO']:
         match = re.search('^gassoc_\w+_P', info)
         if match:
-            annots.add(info)
+            annots.append(info)
             logger.debug("Identified association INFO field '{}'".format(info))
     if not annots:
         sys.exit("No P-value annotations found in VCF header. Exiting.\n")
