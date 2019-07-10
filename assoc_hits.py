@@ -21,8 +21,8 @@ ch.setLevel(logging.INFO)
 formatter = logging.Formatter(
        '[%(asctime)s] %(name)s - %(levelname)s - %(message)s')
 ch.setFormatter(formatter)
+logger.addHandler(ch)
 prog_string = ''
-progress_interval = 1000
 
 class AssocSegregator(RecessiveFilter):
     '''
@@ -195,7 +195,6 @@ class AssocSegregator(RecessiveFilter):
 
 
 def main(args):
-    log_progress = False
     variant_cache = VariantCache()
     vcfreader = VcfReader(args.vcf_input)
     assoc_fields = get_assoc_fields(vcfreader)
@@ -264,13 +263,13 @@ def main(args):
             variant_cache.output_ready.clear()
             assoc_alts = assoc_alts[-1:]
         n += 1
-        if n % progress_interval == 0:
-            update_progress(n, w, record, log_progress)
+        if n % args.progress_interval == 0:
+            update_progress(n, w, record, args.log_progress)
     w += process_cache(variant_cache, assoc_alts, assoc_segregator,
                        args.p_value, args.min_alleles, assoc_fields,
                        vcf_writer, final=True)
     variant_cache.output_ready.clear()
-    update_progress(n, w, record, log_progress)
+    update_progress(n, w, record, args.log_progress)
     if vcf_writer is not sys.stdout:
         vcf_writer.close()
 
@@ -397,7 +396,7 @@ def get_assoc_fields(vcf):
     return annots
 
 def update_progress(n, w, record, log=False):
-    n_prog_string = ("{:,} variants processed, {:,} written".format(n, w) +
+    n_prog_string = ("{:,} variants processed, {:,} written ".format(n, w) +
                      "at {}:{}".format(record.CHROM, record.POS))
     global prog_string
     if log:
@@ -528,7 +527,6 @@ def get_options():
                          or missing prediction/score. This behaviour can be
                          changed using the --filter_unpredicted or
                          --keep_if_any_damaging flags.''')
-
     parser.add_argument('--filter_unpredicted', action='store_true',
                         default=False, help='''For use in conjunction with
                         --missense_filters. The default behaviour when using
@@ -603,6 +601,12 @@ def get_options():
                         variants labelled as pathogenic will only be retained
                         if there are no conflicting 'benign' or 'likely benign'
                         assertions.''')
+    parser.add_argument('--log_progress', action='store_true',
+                        help='''Use logging output for progress rather than
+                        wiping progress line after each update.''')
+    parser.add_argument('--progress_interval', type=int, default=1000, metavar='N',
+                        help='''Report progress information every N variants.
+                        Default=1000.''')
     return parser
 
 if __name__ == '__main__':
