@@ -490,6 +490,8 @@ def main(vcf_input, gnomad, table_output=None, vcf_output=None, pops=None,
         n += 1
         if n % progress_interval == 0:
             update_progress(n, record, log_progress)
+    if out_fh is not sys.stdout:
+        out_fh.close()
 
 if __name__ == '__main__':
     argparser = get_options()
