@@ -492,6 +492,8 @@ def main(vcf_input, gnomad, table_output=None, vcf_output=None, pops=None,
             update_progress(n, record, log_progress)
     if out_fh is not sys.stdout:
         out_fh.close()
+    if vcf_writer is not None:
+        vcf_writer.close()
 
 if __name__ == '__main__':
     argparser = get_options()
