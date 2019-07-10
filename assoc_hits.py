@@ -315,7 +315,7 @@ def process_record(record, variant_cache, pval, min_alleles, assoc_fields,
         else:
             set_true_if_true(remove_alleles, r_alts)
     if all(remove_alleles) or all(remove_csq):
-        return False, []
+        return []
     segs = assoc_segregator.process_record(record, remove_alleles, remove_csq)
     # cache is checked here because it MUST only be checked after running
     # assoc_segregator.process_record or the two caches go out of sync
