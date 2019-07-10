@@ -5,11 +5,12 @@ import re
 import os
 import logging
 import gzip
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from parse_vcf import VcfReader
 from vase.ped_file import PedFile
 from vase.vep_filter import VepFilter
 from vase.family_filter import FamilyFilter, RecessiveFilter
+from vase.family_filter import SegregatingVariant
 from vase.vase_runner import VariantCache
 from Bio import bgzf
 
@@ -74,8 +75,123 @@ class AssocSegregator(RecessiveFilter):
         self.annot_fields = ('homozygous', 'compound_het', 'de_novo',
                             'families', 'features')
 
-    def process_potential_recessives(self, var_to_assoc_alleles, final=False):
-        pass
+    def process_potential_recessives(self, assoc_alleles, final=False):
+        '''
+            Check whether stored PotentialSegregant alleles make up
+            biallelic variation in the same transcript for affected
+            individuals/families where at least one allele is in the
+            assoc_alleles. Adds labels to INFO fields of VCF records and
+            returns an OrderedDict of 'var_ids' to lists of
+            PotentialSegregant objects that appear to segregate
+            consistent with recessive inheritance.
+
+            Clears the cache of stored PotentialSegregant alleles.
+
+            Args:
+                assoc_alleles:
+                        list of alt_ids (matching the 'alt_id' property
+                        of PotentialSegregant objects) that must be
+                        present as at least one allele of biallelics.
+
+                final:  if True, all cached variants will be processed.
+                        Normal behaviour is not to process cached
+                        variants for features present in the last cached
+                        variant to ensure genes/transcripts are only
+                        processed once all variants in that feature have
+                        been encountered.
+
+        '''
+        segregating = OrderedDict() #keys are alt_ids, values are SegregatingBiallelic
+        for feat, prs in self._potential_recessives.items():
+            if not final and feat in self._last_added:
+                continue
+            feat_segregating = [] #list of tuples of values for creating SegregatingBiallelic
+            un_hets = defaultdict(list)  #store het alleles carried by each unaffected
+            aff_hets = defaultdict(list) #store het alleles carried by each affected
+            biallelics = defaultdict(list)  #store biallelic combinations for affecteds
+            for pid,p in prs.items():
+                for un in self.unaffected:
+                    if p.allele_counts[un] == 1:  #already checked for homs when adding
+                        #store allele carried in this unaffected
+                        un_hets[un].append(pid)
+                for aff in (x for x in self.affected
+                            if self.ped.fid_from_iid(x) in p.families):
+                    if p.allele_counts[aff] == 1:
+                        aff_hets[aff].append(pid)
+                    elif p.allele_counts[aff] == 2:
+                        if pid in assoc_alleles:
+                            biallelics[aff].append(tuple([pid]))
+            incompatibles = [] #create a list of sets of incompatible hets
+            for hets in un_hets.values():
+                if len(hets):
+                    incompatibles.append(set(hets))
+            for aff,hets in aff_hets.items():
+                for i in range(len(hets)):
+                    for j in range(i+1, len(hets)):
+                        incomp = False
+                        for iset in incompatibles:
+                            if iset.issuperset([hets[i], hets[j]]):
+                                incomp = True
+                                break
+                        if incomp:
+                            continue
+                        if prs[hets[i]].record.in_cis_with(
+                            sample=aff,
+                            allele=prs[hets[i]].allele,
+                            other=prs[hets[j]].record,
+                            other_allele=prs[hets[j]].allele):
+                            #phase groups indicate alleles in cis
+                            continue
+                        if (hets[i] in assoc_alleles or hets[j] in
+                                assoc_alleles):
+                                biallelics[aff].append(tuple([hets[i],hets[j]]))
+            if not biallelics:
+                continue
+            #see if all affecteds in the same family share the same biallelics
+            for fid,affs in self._fam_to_aff.items():
+                b_affs = set(x for x in affs if x in biallelics)
+                if len(b_affs) == 0 or b_affs != affs:
+                    continue
+                affs = list(affs)
+                absent_in_aff = False
+                for i in range(len(affs)):
+                    for bi in biallelics[affs[i]]:
+                        for j in range(i+1, len(affs)):
+                            if bi not in biallelics[affs[j]]:
+                                absent_in_aff = True
+                                break
+                        if not absent_in_aff:
+                            segs,de_novo = self._check_parents(feat, bi, affs)
+                            if not segs:
+                                continue
+                            if len(bi) == 1:
+                                model = 'homozygous'
+                            else:
+                                model = 'compound_het'
+                            for bi_pr in (prs[x] for x in bi):
+                                feat_segregating.append((bi_pr, affs, [fid],
+                                                         model, [feat],
+                                                         de_novo[bi_pr.alt_id],
+                                                         self.prefix))
+            fam_count = len(set([fam for tup in feat_segregating for fam in
+                                 tup[2]]))
+            if fam_count >= self.min_families:
+                for tp in feat_segregating:
+                    if tp[0] in segregating:
+                        segregating[tp[0]].add_samples(*tp[1:6])
+                    else:
+                        segregating[tp[0]] = SegregatingVariant(*tp)
+        var_to_segregants = OrderedDict()
+        for sb in segregating.values():
+            sb.annotate_record(self.report_file, self.annot_fields)
+            if sb.segregant.var_id in var_to_segregants:
+                var_to_segregants[sb.segregant.var_id].append(sb.segregant)
+            else:
+                var_to_segregants[sb.segregant.var_id] = [sb.segregant]
+        #clear the cache except for the last entry which will be a new gene
+        self._potential_recessives = self._last_added
+        self._last_added = dict()
+        return var_to_segregants
 
 
 def main(args):
@@ -93,6 +209,7 @@ def main(args):
                                        gq=args.gq,
                                        dp=args.dp,
                                        max_dp=args.max_dp,
+                                       min_families=args.min_families,
                                        het_ab=args.het_ab)
     #VepFilter for non-association hits (i.e. functional second hits)
     csq_filter = VepFilter(vcf=vcfreader,
@@ -132,49 +249,49 @@ def main(args):
     else:
         vcf_writer = open(args.output, 'w')
     write_vcf_header(vcfreader, vcf_writer)
-    n = 0
-    var_to_hits = dict()
+    n,w = 0,0
+    assoc_alts = list()
     for record in vcfreader:
-        segs, assocs = process_record(record, args.p_value, args.min_alleles,
-                                      assoc_fields, csq_filter, no_csq_filter,
-                                      assoc_segregator, args.freq, freq_fields)
-        if segs:
-            variant_cache.add_record(record)
-            if assocs:
-                var_to_hits[variant_cache.cache[-1].var_id] = assocs
-        else:
-            variant_cache.check_record(record)
+        assocs = process_record(record, variant_cache, args.p_value,
+                                args.min_alleles, assoc_fields, csq_filter,
+                                no_csq_filter, assoc_segregator, args.freq,
+                                freq_fields)
+        assoc_alts.extend(assocs)
         if variant_cache.output_ready:
-            process_cache(variant_cache, var_to_hits, assoc_segregator,
-                          args.p_value, args.min_alleles, assoc_fields,
-                          vcf_writer)
+            w += process_cache(variant_cache, assoc_alts, assoc_segregator,
+                               args.p_value, args.min_alleles, assoc_fields,
+                               vcf_writer)
             variant_cache.output_ready.clear()
-            var_to_hits = {variant_cache.cache[-1].var_id:
-                           var_to_hits[variant_cache.cache[-1].var_id]}
+            assoc_alts = assoc_alts[-1:]
         n += 1
         if n % progress_interval == 0:
-            update_progress(n, record, log_progress)
-    process_cache(variant_cache, var_to_hits, assoc_segregator, args.p_value,
-                  args.min_alleles, assoc_fields, vcf_writer, final=True)
+            update_progress(n, w, record, log_progress)
+    w += process_cache(variant_cache, assoc_alts, assoc_segregator,
+                       args.p_value, args.min_alleles, assoc_fields,
+                       vcf_writer, final=True)
     variant_cache.output_ready.clear()
+    update_progress(n, w, record, log_progress)
     if vcf_writer is not sys.stdout:
         vcf_writer.close()
 
-def process_cache(cache, var_to_hits, assoc_segregator, pval, min_alleles,
+def process_cache(cache, assoc_alts, assoc_segregator, pval, min_alleles,
                   assoc_fields, outfh, final=False):
+    written = 0
     if final:
-        variant_cache.add_cache_to_output_ready()
-    if not var_to_hits:
-        return
-    var_id_to_seg = assoc_segregator.process_potential_recessives(var_to_hits,
+        cache.add_cache_to_output_ready()
+    if not assoc_alts:
+        return 0
+    var_id_to_seg = assoc_segregator.process_potential_recessives(assoc_alts,
                                                                   final=final)
-    if not any(x in var_to_hits for x in var_id_to_seg):
-        return
-    #OrderedDict([('chr21:46357169-G/A', [<vase.family_filter.PotentialSegregant object at 0x7f2780d8f3f0>]), 
+    for var in cache.output_ready:
+        if var.can_output or var.var_id in var_id_to_seg:
+            outfh.write(str(var.record) + '\n')
+            written += 1
+    return written
 
-
-def process_record(record, pval, min_alleles, assoc_fields, csq_filter,
-                   hit_vep_filter, assoc_segregator, freq, freq_fields):
+def process_record(record, variant_cache, pval, min_alleles, assoc_fields,
+                   csq_filter, hit_vep_filter, assoc_segregator, freq,
+                   freq_fields):
     remove_alleles = [False] * (len(record.ALLELES) -1)
     for i in range(1, len(record.ALLELES)):
         if record.ALLELES[i] == '*':
@@ -199,9 +316,20 @@ def process_record(record, pval, min_alleles, assoc_fields, csq_filter,
         else:
             set_true_if_true(remove_alleles, r_alts)
     if all(remove_alleles) or all(remove_csq):
-        return False, False
+        return False, []
     segs = assoc_segregator.process_record(record, remove_alleles, remove_csq)
-    return segs, is_hit
+    # cache is checked here because it MUST only be checked after running
+    # assoc_segregator.process_record or the two caches go out of sync
+    assoc_alts = list()
+    if segs:
+        variant_cache.add_record(record)
+        for i in (x for x in range(len(is_hit)) if is_hit[x]):
+            alt_id = "{}:{}-{}/{}".format(record.CHROM, record.POS,
+                                          record.REF, record.ALLELES[i+1])
+            assoc_alts.append(alt_id)
+    else:
+        variant_cache.check_record(record)
+    return assoc_alts
 
 def is_assoc_hit(record, pval, min_alleles, assoc_fields):
     '''
@@ -211,7 +339,8 @@ def is_assoc_hit(record, pval, min_alleles, assoc_fields):
     allele_is_hit = [False] * (len(record.ALLELES) -1)
     info = record.parsed_info_fields(fields=['gassoc_cohort_alt'] + assoc_fields)
     for i in range(len(record.ALLELES) - 1):
-        if info['gassoc_cohort_alt'][i] < min_alleles:
+        if (info['gassoc_cohort_alt'][i] is None or
+                info['gassoc_cohort_alt'][i] < min_alleles):
             continue
         is_hit = True
         for f in assoc_fields: #require ALL fields to be <= pval
@@ -267,10 +396,9 @@ def get_assoc_fields(vcf):
         sys.exit("No P-value annotations found in VCF header. Exiting.\n")
     return annots
 
-def update_progress(n, record, log=False):
-    n_prog_string = "{:,} variants processed, at {}:{}".format(n,
-                                                               record.CHROM,
-                                                               record.POS)
+def update_progress(n, w, record, log=False):
+    n_prog_string = ("{:,} variants processed, {:,} written".format(n, w) +
+                     "at {}:{}".format(record.CHROM, record.POS))
     global prog_string
     if log:
         logger.info(n_prog_string)
@@ -306,6 +434,9 @@ def get_options():
     parser.add_argument("-a", "--min_alleles", type=int, default=2, help=
                         '''Minimum observed alleles from association test.
                         Default=2.''')
+    parser.add_argument("--min_families", type=int, default=2, help=
+                        '''Minimum number of families with biallelic hits in a
+                        transcript. Default=2.''')
     parser.add_argument('--freq', type=float, default=0.0, help=
                         '''Allele frequency cutoff. Frequency information will
                         be read from existing VASE and VEP annotations.
