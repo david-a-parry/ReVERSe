@@ -214,6 +214,12 @@ def get_options():
                         where any affected family member is confidently called
                         as homozygous reference a count of 0 will be given even
                         if other members carry the variant allele.''')
+    parser.add_argument('--log_progress', action='store_true',
+                        help='''Use logging output for progress rather than
+                        wiping progress line after each update.''')
+    parser.add_argument('--progress_interval', type=int, default=1000, metavar='N',
+                        help='''Report progress information every N variants.
+                        Default=1000.''')
     return parser
 
 def get_gnomad_pops(vcf):
