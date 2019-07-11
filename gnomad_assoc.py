@@ -90,7 +90,7 @@ class CovAnalyzer(object):
         if pop_file is None:
             pop_file = os.path.join(os.path.dirname(__file__),
                                     "data",
-                                    "pops.tsv")
+                                    "pops.2.1.tsv")
         with open(pop_file, 'rt') as infile:
             header = next(infile)
             cols = self._columns_from_header(header)
@@ -108,7 +108,8 @@ class CovAnalyzer(object):
             return thresholds[-1]
 
     def _get_dp_threshold(self, cols, dp):
-        thresholds = [int(x) for x in cols if x.isdigit()]
+        thresholds = [int(x.lstrip("over_")) for x in cols if
+                      x.lstrip("over_").isdigit()]
         if not thresholds:
             return None
         if dp in thresholds:
@@ -116,7 +117,7 @@ class CovAnalyzer(object):
         return self._get_next_dp(dp, thresholds)
 
     def _check_header(self, header, f, dp):
-        expected_cols = set(['#chrom', "pos", "mean", "median"])
+        expected_cols = set(['chrom', "pos", "mean", "median"])
         cols = self._columns_from_header(header)
         if not expected_cols.issubset(set(cols)):
             self.logger.warn("Did not find expected column headers for file " +
@@ -131,7 +132,7 @@ class CovAnalyzer(object):
             self.logger.warn("Depth threshold column {} not ".format(dp) +
                              "found in {}".format(f) + " - will use a " +
                              "threshold of {}".format(t))
-        self.file_to_dp[f] = cols[str(t)]
+        self.file_to_dp[f] = cols["over_" + str(t)]
         return True
 
     def _cov_file_ok(self, f, dp):
