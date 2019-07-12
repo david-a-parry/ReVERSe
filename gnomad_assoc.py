@@ -226,7 +226,7 @@ def get_options():
 
 def get_gnomad_pops(vcf):
     vreader = VcfReader(vcf)
-    pop_ac_re = re.compile(r'''^AC_([A-Z]+)$''')
+    pop_ac_re = re.compile(r'''^AC_([A-Za-z]+)$''')
     pops = []
     for f in vreader.metadata['INFO']:
         match = pop_ac_re.match(f)
@@ -469,7 +469,8 @@ def main(vcf_input, gnomad, table_output=None, vcf_output=None, pops=None,
                      " found in your gnomAD file ({}): ".format(gnomad) +
                      ", ".join(x for x in set(pops).difference(avail_pops)))
     else:
-        pops = avail_pops
+        pop_blacklist = ['raw', 'male', 'female', 'asj', 'ASJ', 'oth', 'OTH']
+        pops = [x for x in avail_pops if x not in pop_blacklist]
     gnomad_filter = GnomadFilter(vcf=gnomad, prefix="gnomad_assoc", pops=pops)
     cov_analyzer = None
     if coverage_dir is not None:
