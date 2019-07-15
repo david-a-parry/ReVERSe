@@ -454,7 +454,7 @@ def process_variant(record, gnomad_filters, p_value, pops, gts, gt_filter,
                                         alternative='greater')
         results.extend([total_ac, total_an - total_ac, pval, odds])
         if vcf_out:
-            per_allele_results[i].extend(results[5:])
+            per_allele_results.append(results[5:])
         if all_pvals and p_check(x <= p_value for x in all_pvals):
             table_out.write("\t".join((str(x) for x in results)) + "\n")
     if vcf_out:
