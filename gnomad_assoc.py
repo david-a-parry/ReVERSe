@@ -33,13 +33,16 @@ class CovAnalyzer(object):
         coverage files
     """
 
-    def __init__(self, coverage_directory, dp_cutoff=10, pops_file=None,
-                 cohort="Exomes"):
+    def __init__(self, coverage_files=[], coverage_directory=None,
+                 dp_cutoff=10, pops_file=None, cohort="Exomes"):
         """
             Find valid coverage files in coverage_directory and determine
             what coverage cutoff to use (bisect available coverage
             threshold columns left on dp_cutoff). Create tabix
         """
+        if not coverage_files and not coverage_directory:
+            raise ValueError("One of 'coverage_files' or 'coverage_directory'"+
+                             " args must be given.")
         self.logger = logging.getLogger("CovAnalyzer")
         self.logger.setLevel(logging.INFO)
         ch = logging.StreamHandler()
@@ -49,7 +52,7 @@ class CovAnalyzer(object):
         ch.setFormatter(formatter)
         self.file_to_dp = dict()    #cov column to use for each coverage file
         self.file_to_tbx = dict() #tabix iters for searching by coordinate
-        self._collect_cov_files(coverage_directory, dp_cutoff)
+        self._collect_cov_files(coverage_files, coverage_directory, dp_cutoff)
         for f in self.file_to_dp:
             self.file_to_tbx[f] = pysam.TabixFile(f, parser=pysam.asTuple())
         self.pop_counts = self._read_pops(pops_file)
@@ -71,8 +74,8 @@ class CovAnalyzer(object):
             Return fraction of samples above threshold at this position.
         """
         #TODO check whether coverage files have chr prefix - currently we
-        # assume that coverage files will NOT have chr prefix
-        contig = contig.lstrip("chr")
+        # assume that coverage files will match the input VCF
+        #contig = contig.lstrip("chr")
         for f, tbx in self.file_to_tbx.items():
             try:
                 for row in tbx.fetch(contig, pos -1 , pos):
@@ -148,53 +151,64 @@ class CovAnalyzer(object):
                 self.logger.warn("Error parsing {} - skipping".format(f))
                 return False
 
-    def _collect_cov_files(self, cov_dir, dp):
+    def _collect_cov_files(self, cov_files, cov_dir, dp):
         '''
             Set self.file_to_dp dictionary - keys are all valid coverage
             files, values are the columns of the closest depth threshold
-            to that given to __init__.
+            to that given to __init__. Setting of self.file_to_dp
+            dictionary is handled within _cov_file_ok method.
         '''
-        cov_files = [os.path.join(cov_dir, f) for f in os.listdir(cov_dir) if
-                     self._cov_file_ok(os.path.join(cov_dir, f), dp)]
-        if not cov_files:
-            sys.exit("No valid coverage files found - exiting")
+        if cov_dir:
+            cov_files.extend(os.path.join(cov_dir, f) for f in
+                             os.listdir(cov_dir))
 
+        valid_cov_files = [f for f in cov_files if self._cov_file_ok(f, dp)]
+        if not valid_cov_files:
+            sys.exit("No valid coverage files found - exiting")
 
 
 def get_options():
     parser = argparse.ArgumentParser(description='''
-            Do a crude association test against a gnomAD VCF file.''')
+            Do a crude association test against gnomAD VCF file(s).''')
     parser.add_argument("-i", "--vcf_input", "--vcf", required=True,
                         help='Input VCF file')
-    parser.add_argument("-g", "--gnomad", required=True, help='gnomAD VCF file'
-                        )
+    parser.add_argument("-e", "--exomes", help='gnomAD exomes VCF file')
+    parser.add_argument("-g", "--genomes", help='gnomAD genomes VCF file')
     parser.add_argument("-t", "--table_output", help='''Table output of
                         variants, counts and p-values. Default=STDOUT''')
     parser.add_argument("-v", "--vcf_output", help='''VCF output. If provided
                         all variants will be written to this file with counts
                         and p-values annotated. If the filename ends with '.gz'
                         it will automatically compressed with bgzip.''')
-    parser.add_argument("-c", "--coverage_dir", help='''Coverage directory as
-                        downloaded from gnomAD containing one or more coverage
-                        files. Coverage files must be sorted, bgzip compressed
-                        and tabix indexed. These will be used to infer the
-                        number of alleles at a given site above the coverage
-                        threshold if not present in the gnomAD VCF file. If No
+    parser.add_argument("--exome_coverage_files", nargs='+', help='''One or
+                        more coverage summary files for Exome cohorts. Coverage
+                        files must be sorted, bgzip compressed and tabix
+                        indexed. These will be used to infer the number of
+                        alleles at a given site above the coverage threshold if
+                        a variant is not present in the gnomAD VCF file. If No
                         coverage files are provided p-values will only be
-                        calculated for variants present in the gnomAD VCF. Note
-                        that these coverage files should correspond to the same
-                        data used in the gnomAD VCF file (e.g. exome or WGS).''')
+                        calculated for variants present in the gnomAD VCFs.''')
+    parser.add_argument("--genome_coverage_files", nargs='+', help='''One or
+                        more coverage summary files for whole genome
+                        cohorts.''')
+    parser.add_argument("--exome_coverage_dir", help='''Coverage directory as
+                        downloaded from gnomAD containing one or more coverage
+                        summary files for Exome cohorts. Coverage files must be
+                        sorted, bgzip compressed and tabix indexed. These will
+                        be used to infer the number of alleles at a given site
+                        above the coverage threshold if a variant is not
+                        present in the gnomAD VCF file. If No coverage files
+                        are provided p-values will only be calculated for
+                        variants present in the gnomAD VCF.''')
+    parser.add_argument("--genome_coverage_dir", help='''Coverage directory as
+                        above but for whole genome sequenced samples.''')
     parser.add_argument("-d", "--dp_cutoff", type=int, default=10,
                         help='''Calculate allele numbers using coverage files
                         at this depth threshold. Default=10''')
     parser.add_argument("-p", "--pops", nargs='+', help='''One or more gnomAD
-                        populations to test against.''')
-    parser.add_argument("--cohort", action='store_true', default="Exomes",
-                        help='''gnomAD cohort to use for inferring sample
-                        number at sites without a variant. Population counts
-                        will be calculated from coverage data provided to the
-                        --coverage_dir argument. Valid values are "Exomes",
-                        "Genomes" or "Total". Default=Exomes.''')
+                        populations to test against. Default to all 3-letter
+                        population codes identified in VCF header excluding
+                        ASJ/asj and OTH/oth.''')
     parser.add_argument("-s", "--samples", nargs='+', help='''One or more
                         samples to process. Defaults to all samples in input
                         file.''')
@@ -226,7 +240,7 @@ def get_options():
 
 def get_gnomad_pops(vcf):
     vreader = VcfReader(vcf)
-    pop_ac_re = re.compile(r'''^AC_([A-Za-z]+)$''')
+    pop_ac_re = re.compile(r'''^AC_([A-Za-z]{3})$''')
     pops = []
     for f in vreader.metadata['INFO']:
         match = pop_ac_re.match(f)
@@ -319,7 +333,7 @@ def write_vcf_header(vcf, fh, pops):
            'gassoc_cohort_non_alt': {'Number': 'A', 'Type': 'Integer',
                                      'Description':
                                      '"non-ALT allele counts in cohort"'},
-           }
+          }
     for p in pops:
         for f in g_columns:
             ftype = 'Float' if f in ['P', 'OR'] else 'Integer'
@@ -353,27 +367,19 @@ def update_progress(n, record, log=False):
         sys.stderr.write(prog_string)
     prog_string = n_prog_string
 
-def process_variant(record, gnomad_filter, p_value, pops, gts, gt_filter,
-                    table_out, vcf_out, cov_analyzer=None,
+def process_variant(record, gnomad_filters, p_value, pops, gts, gt_filter,
+                    table_out, vcf_out, cov_analyzers=dict(), pop_ids=None,
                     max_one_per_sample=False, families=None,
                     require_all_p_values=False):
-    if cov_analyzer:
-        covered = cov_analyzer.samples_at_site(record.CHROM, record.POS)
-        if sum(covered.values()) == 0:
-            return #no population covered sufficiently
-    overlapping = gnomad_filter.get_overlapping_records(record)
-    p_check = all if require_all_p_values else any
-    i = 0
-    per_allele_results = []
-    for allele in record.DECOMPOSED_ALLELES:
-        if allele.ALT == '*':
-            if vcf_out:
-                per_allele_results.append(['.'] * (4 * len(pops) + 2))
+    cohort_covered = dict()
+    cov_ok = False
+    alt_ref_counts = []
+    if not pop_ids:
+        pop_ids = sorted(set(p for x in pops.values() for p in x))
+    for i in range(1, len(record.ALLELES)):
+        if record.ALLELES[i] == '*':
+            alt_ref_counts.append([-1, -1])
             continue
-        i += 1
-        filt,keep,matched,annot = gnomad_filter._compare_var_values(allele,
-                                                                    overlapping
-                                                                   )
         if families is not None:
             indvs = _one_individual_per_fam(gts, gt_filter, i, families)
         else:
@@ -387,45 +393,83 @@ def process_variant(record, gnomad_filter, p_value, pops, gts, gt_filter,
         #TODO rethink for sex chromosomes
         chroms = sum(2 for s in gts['GT'] if gt_filter.gt_is_ok(gts, s, i))
         refs = chroms - alts
+        alt_ref_counts.append([alts, refs])
+    g_cohort_to_counts = defaultdict(list) #dict of pops -> [AC,AN]
+    for c in ['Exomes', 'Genomes']:
+        if c not in gnomad_filters:
+            continue
+        covered = dict()
+        if c in cov_analyzers:
+            covered = cov_analyzers[c].samples_at_site(record.CHROM,record.POS)
+            if sum(covered.values()) == 0:
+                continue  #no population covered sufficiently - skip cohort
+        overlapping = gnomad_filters[c].get_overlapping_records(record)
+        for i in range(len(record.DECOMPOSED_ALLELES)):
+            if record.DECOMPOSED_ALLELES[i].ALT == '*':
+                for p in pops[c]:
+                    g_cohort_to_counts[p].append([-1, -1])
+                continue
+            filt,keep,matched,annot = gnomad_filters[c]._compare_var_values(
+                record.DECOMPOSED_ALLELES[i], overlapping)
+            for p in pops[c]:
+                if len(g_cohort_to_counts[p]) <= i:
+                    g_cohort_to_counts[p].append([0, 0])
+                ac,an = 0,0
+                if not annot: #no matching variant in gnomad VCF
+                    if p in covered:
+                        an = covered[p]
+                else:
+                    ac = int(annot['AC_' + p])
+                    an = int(annot['AN_' + p])
+                g_cohort_to_counts[p][i][0] += ac
+                g_cohort_to_counts[p][i][1] += an
+    if not g_cohort_to_counts and not vcf_out: #no gnomAD data collected
+        return
+    #got counts for each cohort type for each allele - compute p-values
+    p_check = all if require_all_p_values else any
+    per_allele_results = []
+    for i in range(len(record.DECOMPOSED_ALLELES)):
+        allele = record.DECOMPOSED_ALLELES[i]
+        if allele.ALT == '*':
+            per_allele_results.append(['.'] * (4 * len(pops) + 2))
+            continue
+        alts,refs = alt_ref_counts[i]
         results = [allele.CHROM, allele.POS, record.ID,  allele.REF,
                    allele.ALT, alts, refs]
         all_pvals = []
-        if not annot: #no matching variant in gnomad VCF
-            if cov_analyzer:
-                for p in pops:
-                    an = covered[p]
-                    odds, pval = stats.fisher_exact([(alts, refs), (0, an)],
-                                                    alternative='greater')
-                    all_pvals.append(pval)
-                    results.extend([0, an, pval, odds])
-        else:
-            total_ac = 0
-            total_an = 0
-            for p in pops:
-                ac = int(annot['AC_' + p])
-                an = int(annot['AN_' + p])
+        total_ac, total_an = 0,0
+        for p in pop_ids:
+            if p in g_cohort_to_counts:
+                ac, an = g_cohort_to_counts[p][i]
                 odds, pval = stats.fisher_exact([(alts, refs), (ac, an-ac)],
                                                 alternative='greater')
                 all_pvals.append(pval)
                 results.extend([ac, an - ac, pval, odds])
                 total_ac += ac
                 total_an += an
-            odds, pval = stats.fisher_exact([(alts, refs), (total_ac,
-                                                            total_an-total_ac)],
-                                            alternative='greater')
-            results.extend([total_ac, total_an - total_ac, pval, odds])
+            else:
+                results.extend(['.'] * 4)
+        odds, pval = stats.fisher_exact([(alts, refs), (total_ac,
+                                                        total_an-total_ac)],
+                                        alternative='greater')
+        results.extend([total_ac, total_an - total_ac, pval, odds])
         if vcf_out:
-            per_allele_results.append(results[5:])
+            per_allele_results[i].extend(results[5:])
         if all_pvals and p_check(x <= p_value for x in all_pvals):
             table_out.write("\t".join((str(x) for x in results)) + "\n")
     if vcf_out:
-        write_record(vcf_out, record, per_allele_results, pops)
+        write_record(vcf_out, record, per_allele_results, pop_ids)
 
-def main(vcf_input, gnomad, table_output=None, vcf_output=None, pops=None,
-         samples=None, bed=None, p_value=0.05, dp_cutoff=10, coverage_dir=None,
-         cohort="Exomes", gq=20, dp=5, max_dp=250, het_ab=0.25, hom_ab=0.95,
-         ped=None, require_all_p_values=False, max_one_per_sample=False,
+def main(vcf_input, genomes=None, exomes=None, table_output=None,
+         vcf_output=None, pops=None, samples=None, bed=None, p_value=0.05,
+         dp_cutoff=10, exome_coverage_dir=None, genome_coverage_dir=None,
+         exome_coverage_files=None, genome_coverage_files=None,
+         gq=20, dp=5, max_dp=250, het_ab=0.25, hom_ab=0.95, ped=None,
+         require_all_p_values=False, max_one_per_sample=False,
          progress_interval=1000, log_progress=False):
+    if genomes is None and exomes is None:
+        sys.exit('''At least one of --genomes or --exomes arguments must be
+                 provided.''')
     vcfreader = VcfReader(vcf_input)
     out_fh = sys.stdout if table_output is None else open(table_output, 'w')
     vcf_writer = None
@@ -460,33 +504,53 @@ def main(vcf_input, gnomad, table_output=None, vcf_output=None, pops=None,
         logger.info("Reading, sorting and merging intervals in " +
                     "{}".format(bed))
         varstream = VarByRegion(vcfreader, bed=bed)
-    avail_pops = get_gnomad_pops(gnomad)
-    if not avail_pops:
-        sys.exit("ERROR: No gnomAD populations found in {}".format(pops))
-    if pops:
-        if not avail_pops.issuperset(set(pops)):
-            sys.exit("ERROR - the following specified populations were not" +
-                     " found in your gnomAD file ({}): ".format(gnomad) +
-                     ", ".join(x for x in set(pops).difference(avail_pops)))
-    else:
-        pop_blacklist = ['raw', 'male', 'female', 'asj', 'ASJ', 'oth', 'OTH']
-        pops = [x for x in avail_pops if x not in pop_blacklist]
-    gnomad_filter = GnomadFilter(vcf=gnomad, prefix="gnomad_assoc", pops=pops)
-    cov_analyzer = None
-    if coverage_dir is not None:
-        cov_analyzer = CovAnalyzer(coverage_dir, dp_cutoff=dp_cutoff,
-                                   cohort=cohort)
-    pops = sorted(list(pops))
+    gnomad_filters = dict()
+    cov_analyzers = dict()
+    cohort_pops = dict()
+    for gnomad, cohort, cov_dir, cov_files in [
+        (exomes, 'Exomes', exome_coverage_dir, exome_coverage_files),
+        (genomes, 'Genomes', genome_coverage_dir, genome_coverage_files)
+    ]:
+        if gnomad is None:
+            continue
+        avail_pops = get_gnomad_pops(gnomad)
+        if not avail_pops:
+            sys.exit("ERROR: No gnomAD populations found in {}".format(gnomad))
+        if pops:
+            if not avail_pops.issuperset(set(pops)):
+                logger.warn("The following specified populations were not " +
+                            "found in your gnomAD file ({}): ".format(gnomad) +
+                            ", ".join(x for x in set(pops).difference(
+                                avail_pops))
+                           )
+            these_pops = [p for p in pops if p in avail_pops]
+            if not these_pops:
+                sys.exit("ERROR: No specified populations available in " +
+                         "gnomAD file '{}'".format(gnomad))
+        else:
+            pop_blacklist = ['raw', 'asj', 'ASJ', 'oth', 'OTH']
+            these_pops = [x for x in avail_pops if x not in pop_blacklist]
+        gnomad_filters[cohort] = GnomadFilter(vcf=gnomad,
+                                              prefix="gnomad_assoc",
+                                              pops=these_pops)
+        if cov_dir is not None or cov_files is not None:
+            cov_analyzers[cohort] = CovAnalyzer(coverage_files=cov_files,
+                                                coverage_directory=cov_dir,
+                                                dp_cutoff=dp_cutoff,
+                                                cohort=cohort)
+        cohort_pops[cohort] = sorted(list(these_pops))
+    all_pops = sorted(set(p for x in cohort_pops.values() for p in x))
     header = ["#chrom", "pos", "id", "ref", "alt", "cases_alt", "cases_ref"]
     header.extend([x + "_alt\t" + x + "_ref\t" + x + "_p\t"  + x + "_odds" for
-                   x in pops])
+                   x in all_pops])
     out_fh.write("\t".join(header) + "\n")
     n = 0
     for record in varstream:
         gts = record.parsed_gts(fields=gt_fields, samples=samples)
-        process_variant(record=record, gnomad_filter=gnomad_filter, pops=pops,
-                        table_out=out_fh, vcf_out=vcf_writer, p_value=p_value,
-                        cov_analyzer=cov_analyzer, gts=gts,
+        process_variant(record=record, gnomad_filters=gnomad_filters,
+                        pops=cohort_pops, pop_ids=all_pops,
+                        cov_analyzers=cov_analyzers, gts=gts, table_out=out_fh,
+                        vcf_out=vcf_writer, p_value=p_value,
                         gt_filter=gt_filter, families=families,
                         require_all_p_values=require_all_p_values,
                         max_one_per_sample=max_one_per_sample)
