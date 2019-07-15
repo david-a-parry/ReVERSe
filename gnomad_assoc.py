@@ -473,12 +473,6 @@ def main(vcf_input, genomes=None, exomes=None, table_output=None,
     vcfreader = VcfReader(vcf_input)
     out_fh = sys.stdout if table_output is None else open(table_output, 'w')
     vcf_writer = None
-    if vcf_output is not None:
-        if vcf_output.endswith(('.gz', '.bgz')):
-            vcf_writer = bgzf.BgzfWriter(vcf_output)
-        else:
-            vcf_writer = open(vcf_output, 'w')
-        write_vcf_header(vcfreader, vcf_writer, pops)
     if samples is None:
         samples = vcfreader.header.samples
     else:
@@ -540,6 +534,12 @@ def main(vcf_input, genomes=None, exomes=None, table_output=None,
                                                 cohort=cohort)
         cohort_pops[cohort] = sorted(list(these_pops))
     all_pops = sorted(set(p for x in cohort_pops.values() for p in x))
+    if vcf_output is not None:
+        if vcf_output.endswith(('.gz', '.bgz')):
+            vcf_writer = bgzf.BgzfWriter(vcf_output)
+        else:
+            vcf_writer = open(vcf_output, 'w')
+        write_vcf_header(vcfreader, vcf_writer, all_pops)
     header = ["#chrom", "pos", "id", "ref", "alt", "cases_alt", "cases_ref"]
     header.extend([x + "_alt\t" + x + "_ref\t" + x + "_p\t"  + x + "_odds" for
                    x in all_pops])
