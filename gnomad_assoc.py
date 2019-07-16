@@ -431,7 +431,7 @@ def process_variant(record, gnomad_filters, p_value, pops, gts, gt_filter,
     for i in range(len(record.DECOMPOSED_ALLELES)):
         allele = record.DECOMPOSED_ALLELES[i]
         if allele.ALT == '*':
-            per_allele_results.append(['.'] * (4 * len(pop_ids) + 2))
+            per_allele_results.append(['.'] * (4 * len(pop_ids) + 6))
             continue
         alts,refs = alt_ref_counts[i]
         results = [allele.CHROM, allele.POS, record.ID,  allele.REF,
@@ -458,7 +458,7 @@ def process_variant(record, gnomad_filters, p_value, pops, gts, gt_filter,
         if all_pvals and p_check(x <= p_value for x in all_pvals):
             table_out.write("\t".join((str(x) for x in results)) + "\n")
     if vcf_out:
-        write_record(vcf_out, record, per_allele_results, pop_ids)
+        write_record(vcf_out, record, per_allele_results, pop_ids + ['all'])
 
 def main(vcf_input, genomes=None, exomes=None, table_output=None,
          vcf_output=None, pops=None, samples=None, bed=None, p_value=0.05,
@@ -514,9 +514,7 @@ def main(vcf_input, genomes=None, exomes=None, table_output=None,
             if not avail_pops.issuperset(set(pops)):
                 logger.warn("The following specified populations were not " +
                             "found in your gnomAD file ({}): ".format(gnomad) +
-                            ", ".join(x for x in set(pops).difference(
-                                avail_pops))
-                           )
+                            ", ".join(set(pops).difference(avail_pops)))
             these_pops = [p for p in pops if p in avail_pops]
             if not these_pops:
                 sys.exit("ERROR: No specified populations available in " +
