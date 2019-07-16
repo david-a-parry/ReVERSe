@@ -247,7 +247,7 @@ def main(args):
         vcf_writer = bgzf.BgzfWriter(args.output)
     else:
         vcf_writer = open(args.output, 'w')
-    write_vcf_header(vcfreader, vcf_writer)
+    write_vcf_header(vcfreader, vcf_writer, assoc_segregator)
     n,w = 0,0
     assoc_alts = list()
     for record in vcfreader:
@@ -409,11 +409,13 @@ def update_progress(n, w, record, log=False):
     prog_string = n_prog_string
 
 
-def write_vcf_header(vcf, fh):
+def write_vcf_header(vcf, fh, assoc_seg):
     vcf.header.add_header_field(name="assoc_hits",
                                string='"' + str.join(" ", sys.argv) + '"')
     inf = dict()
-    #TODO - get new INFO fields
+    for f in assoc_seg.header_fields:
+        inf[f[0]] = {'Number' : 'A', 'Type' : 'String',
+                     'Description' : f[1] }
     for f,d in inf.items():
         vcf.header.add_header_field(name=f, dictionary=d, field_type='INFO')
     fh.write(str(vcf.header))
