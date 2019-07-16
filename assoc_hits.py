@@ -197,7 +197,16 @@ class AssocSegregator(RecessiveFilter):
 def main(args):
     variant_cache = VariantCache()
     vcfreader = VcfReader(args.vcf_input)
-    assoc_fields = get_assoc_fields(vcfreader)
+    avail_assoc_fields = get_assoc_fields(vcfreader)
+    if args.pops:
+        assoc_fields = ['gassoc_{}_P'.format(x) for x in args.pops]
+        if not set(avail_assoc_fields).issuperset(set(assoc_fields)):
+            sys.exit("ERROR: The following P-value annotations populations " +
+                     "were not found in your VCF: " + ", ".join(
+                         set(assoc_fields).difference(avail_assoc_fields)) +
+                     ". Check populations provided to --pops.")
+    else:
+        assoc_fields = avail_assoc_fields
     freq_fields = []
     if args.freq:
         freq_fields = get_vase_freq_annots(vcfreader)
@@ -247,14 +256,20 @@ def main(args):
         vcf_writer = bgzf.BgzfWriter(args.output)
     else:
         vcf_writer = open(args.output, 'w')
+    any_or_all = any if args.allow_any_pop else all
     write_vcf_header(vcfreader, vcf_writer, assoc_segregator)
     n,w = 0,0
     assoc_alts = list()
     for record in vcfreader:
-        assocs = process_record(record, variant_cache, args.p_value,
-                                args.min_alleles, assoc_fields, csq_filter,
-                                no_csq_filter, assoc_segregator, args.freq,
-                                freq_fields)
+        assocs = process_record(record, variant_cache=variant_cache,
+                                pval=args.p_value,
+                                min_alleles=args.min_alleles,
+                                assoc_fields=assoc_fields,
+                                csq_filter=csq_filter,
+                                hit_vep_filter=no_csq_filter,
+                                assoc_segregator=assoc_segregator,
+                                freq=args.freq, freq_fields=freq_fields,
+                                any_or_all=any_or_all)
         assoc_alts.extend(assocs)
         if variant_cache.output_ready:
             w += process_cache(variant_cache, assoc_alts, assoc_segregator,
@@ -290,7 +305,7 @@ def process_cache(cache, assoc_alts, assoc_segregator, pval, min_alleles,
 
 def process_record(record, variant_cache, pval, min_alleles, assoc_fields,
                    csq_filter, hit_vep_filter, assoc_segregator, freq,
-                   freq_fields):
+                   freq_fields, any_or_all):
     remove_alleles = [False] * (len(record.ALLELES) -1)
     for i in range(1, len(record.ALLELES)):
         if record.ALLELES[i] == '*':
@@ -298,7 +313,7 @@ def process_record(record, variant_cache, pval, min_alleles, assoc_fields,
     if freq_fields and freq:
         r = filter_on_existing_freq(record, freq, freq_fields)
         set_true_if_true(remove_alleles, r)
-    is_hit = is_assoc_hit(record, pval, min_alleles, assoc_fields)
+    is_hit = is_assoc_hit(record, pval, min_alleles, assoc_fields, any_or_all)
     if any(is_hit):
         r_alts, h_remove_csq = hit_vep_filter.filter(record)
         set_true_if_true(remove_alleles, r_alts)
@@ -330,7 +345,7 @@ def process_record(record, variant_cache, pval, min_alleles, assoc_fields,
         variant_cache.check_record(record)
     return assoc_alts
 
-def is_assoc_hit(record, pval, min_alleles, assoc_fields):
+def is_assoc_hit(record, pval, min_alleles, assoc_fields, any_or_all=all):
     '''
         For each ALT allele check if they meet the requirement for an
         enrichment hit
@@ -341,13 +356,9 @@ def is_assoc_hit(record, pval, min_alleles, assoc_fields):
         if (info['gassoc_cohort_alt'][i] is None or
                 info['gassoc_cohort_alt'][i] < min_alleles):
             continue
-        is_hit = True
-        for f in assoc_fields: #require ALL fields to be <= pval
-            if info[f][i] is None or info[f][i] > pval:
-                is_hit = False
-                break
-        if is_hit:
-            allele_is_hit[i] = is_hit
+        if any_or_all(info[f][i] is not None and info[f][i] <= pval for f in
+                      assoc_fields):
+            allele_is_hit[i] = True
     return allele_is_hit
 
 def set_true_if_true(a, b):
@@ -438,6 +449,14 @@ def get_options():
     parser.add_argument("--min_families", type=int, default=2, help=
                         '''Minimum number of families with biallelic hits in a
                         transcript. Default=2.''')
+    parser.add_argument("--allow_any_pop", action='store_true',
+                        help='''Require the p-value to be under threshold for
+                        any population instead of requiring all analyzed
+                        populations to have a p-value lower than the
+                        threshold.''')
+    parser.add_argument("--pops", nargs='+', help='''One or more gnomAD
+                        populations to test against. Default to all
+                        annotated p-values from gnomad_assoc.py.''')
     parser.add_argument('--freq', type=float, default=0.0, help=
                         '''Allele frequency cutoff. Frequency information will
                         be read from existing VASE and VEP annotations.
