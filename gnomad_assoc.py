@@ -431,7 +431,7 @@ def process_variant(record, gnomad_filters, p_value, pops, gts, gt_filter,
     for i in range(len(record.DECOMPOSED_ALLELES)):
         allele = record.DECOMPOSED_ALLELES[i]
         if allele.ALT == '*':
-            per_allele_results.append(['.'] * (4 * len(pops) + 2))
+            per_allele_results.append(['.'] * (4 * len(pop_ids) + 2))
             continue
         alts,refs = alt_ref_counts[i]
         results = [allele.CHROM, allele.POS, record.ID,  allele.REF,
