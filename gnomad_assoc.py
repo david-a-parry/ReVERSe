@@ -334,20 +334,20 @@ def write_vcf_header(vcf, fh, pops):
                                      'Description':
                                      '"non-ALT allele counts in cohort"'},
           }
-    for p in pops:
+    for p in pops + ['all']:
         for f in g_columns:
             ftype = 'Float' if f in ['P', 'OR'] else 'Integer'
             field_name = "gassoc_" + p + "_" + f
             if f == 'alt':
-                desc = '"ALT allele counts for {} population"'.format(p)
+                desc = '"ALT allele counts for {} populations"'.format(p)
             elif f == 'non_alt':
-                desc = '"non-ALT allele counts for {} population"'.format(p)
+                desc = '"non-ALT allele counts for {} populations"'.format(p)
             elif f == 'P':
-                desc = ('"Fisher\'s P-value for {} population vs '.format(p) +
+                desc = ('"Fisher\'s P-value for {} populations vs '.format(p) +
                         'cohort"')
             elif f == 'OR':
                 desc = ('"Odds ratio from Fisher\'s test for {} '.format(p) +
-                       'population vs cohort"')
+                       'populations vs cohort"')
             inf[field_name] = {'Number': 'A', 'Type': ftype,
                                'Description': desc }
     for f,d in inf.items():
