@@ -210,6 +210,14 @@ def main(args):
     freq_fields = []
     if args.freq:
         freq_fields = get_vase_freq_annots(vcfreader)
+    allele_filters = [] #lambdas for filtering alleles for non-hit ALTs
+    if args.cadd_phred:
+        if 'CADD_PHRED_score' not in vcfreader.metadata['INFO']:
+            sys.exit("No pre-exisiting CADD_PHRED_score INFO annotation in " +
+                     "header - please annotate CADD scores using vase if you" +
+                     " want to use --cadd_phred cutoffs.")
+        cadd_filter = lambda x: filter_on_existing_cadd(x, args.cadd_phred)
+        allele_filters.append(cadd_filter)
     pedfile = PedFile(args.ped)
     family_filter = FamilyFilter(ped=pedfile, vcf=vcfreader,
                                  logging_level=logger.level)
@@ -269,7 +277,8 @@ def main(args):
                                 hit_vep_filter=no_csq_filter,
                                 assoc_segregator=assoc_segregator,
                                 freq=args.freq, freq_fields=freq_fields,
-                                any_or_all=any_or_all)
+                                any_or_all=any_or_all,
+                                allele_filters=allele_filters)
         assoc_alts.extend(assocs)
         if variant_cache.output_ready:
             w += process_cache(variant_cache, assoc_alts, assoc_segregator,
@@ -305,7 +314,7 @@ def process_cache(cache, assoc_alts, assoc_segregator, pval, min_alleles,
 
 def process_record(record, variant_cache, pval, min_alleles, assoc_fields,
                    csq_filter, hit_vep_filter, assoc_segregator, freq,
-                   freq_fields, any_or_all):
+                   freq_fields, any_or_all, allele_filters=[]):
     remove_alleles = [False] * (len(record.ALLELES) -1)
     for i in range(1, len(record.ALLELES)):
         if record.ALLELES[i] == '*':
@@ -329,6 +338,14 @@ def process_record(record, variant_cache, pval, min_alleles, assoc_fields,
                           else h_remove_csq[i] for i in range(len(remove_csq))]
         else:
             set_true_if_true(remove_alleles, r_alts)
+        for afilter in allele_filters:
+            r_alts = afilter(record)
+            if any(is_hit):
+                remove_alleles = [r_alts[i] if not is_hit[i] else
+                                  remove_alleles[i] for i in
+                                  range(len(r_alts))]
+            else:
+                set_true_if_true(remove_alleles, r_alts)
     if all(remove_alleles) or all(remove_csq):
         return []
     segs = assoc_segregator.process_record(record, remove_alleles, remove_csq)
@@ -376,6 +393,16 @@ def filter_on_existing_freq(record, freq, freq_fields):
             if parsed[annot][i] is not None:
                 if parsed[annot][i] >= freq:
                     remove[i] = True
+    return remove
+
+def filter_on_existing_cadd(record, score):
+    remove  = [False] * (len(record.ALLELES) -1)
+    phreds = record.parsed_info_fields(fields=['CADD_PHRED_score'])
+    if 'CADD_PHRED_score' in phreds:
+        for i in range(len(remove)):
+            if (phreds['CADD_PHRED_score'][i] is not None and
+                phreds['CADD_PHRED_score'][i] < score):
+                remove[i] = True
     return remove
 
 def get_vase_freq_annots(vcf):
@@ -483,12 +510,13 @@ def get_options():
                          as no-calls. Default = 0.''')
     parser.add_argument('--csq', nargs='+', help=
                         '''One or more VEP consequence classes to retain.
-                        Variants which do not result in one of these VEP
-                        consequence classes will be filtered.
-                        Default=['TFBS_ablation', 'TFBS_amplification',
-                        'inframe_deletion', 'inframe_insertion',
-                        'frameshift_variant', 'initiator_codon_variant',
-                        'missense_variant', 'protein_altering_variant',
+                        Variants that are not below the P-value cut-off which
+                        do not result in one of these VEP consequence classes
+                        will be filtered. Default=['TFBS_ablation',
+                        'TFBS_amplification', 'inframe_deletion',
+                        'inframe_insertion', 'frameshift_variant',
+                        'initiator_codon_variant', 'missense_variant',
+                        'protein_altering_variant',
                         'regulatory_region_ablation',
                         'regulatory_region_amplification',
                         'splice_acceptor_variant', 'splice_donor_variant',
@@ -571,7 +599,6 @@ def get_options():
                         prediction/score. This behaviour is overridden by
                         '--filter_unpredicted' when a prediction/score is
                         missing for any program.''')
-
     parser.add_argument('--splice_filters', nargs='+', help='''Similar to
                         --missense_filters except only splice consequences
                         (splice_donor_variant, splice_acceptor_variant and
@@ -584,11 +611,9 @@ def get_options():
                         dbscSNV ada_score cutoff below the default value (0.7).
                         Alternatively, '--splice_filters ada_score=0.9' would
                         filter on a higher threshold of 0.9 or above.''')
-
     parser.add_argument('--splice_filter_unpredicted', action='store_true',
                         default=False, help='''Same as --filter_unpredicted but
                         for --splice_filters only.''')
-
     parser.add_argument('--splice_keep_if_any_damaging', action='store_true',
                         default=False, help= '''Same as --keep_if_any_damaging
                         but for --splice_filters only.''')
@@ -606,7 +631,6 @@ def get_options():
                         '''One or more VEP allele frequency annotations to
                         use for frequency filtering. Default is to use all
                         standard VEP AF annotations.''')
-
     parser.add_argument('--pathogenic', action='store_true', help='''When used
                         in conjunction with --csq argument, retain variants
                         flagged as pathogenic by either 'CLIN_SIG' or
@@ -622,6 +646,10 @@ def get_options():
                         variants labelled as pathogenic will only be retained
                         if there are no conflicting 'benign' or 'likely benign'
                         assertions.''')
+    parser.add_argument('--cadd_phred', type=float, help='''CADD Phred score
+                        cutoff for variants that are not below the P-value
+                        threshold. Requires CADD scores to have been annotated
+                        on your VCF using vase.''')
     parser.add_argument('--log_progress', action='store_true',
                         help='''Use logging output for progress rather than
                         wiping progress line after each update.''')
