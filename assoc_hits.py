@@ -28,6 +28,18 @@ class AssocSegregator(RecessiveFilter):
     '''
         Look for recessive combinations including at least one designated
         association 'hit'
+
+        Arguments are same as for RecessiveFilter except:
+
+                max_incidentals:
+                        Maximum number of families with an individual
+                        that may carries an allele of a biallelic variant
+                        where affected individuals in that family do not
+                        have a second qualifying variant. Useful for
+                        filtering out implausibly common alleles that by
+                        chance segregate in a subset of families.
+                        Default=0 (i.e. not applied).
+
     '''
 
     def __init__(self, family_filter, gq=0, dp=0, max_dp=0, het_ab=0.,
@@ -38,7 +50,7 @@ class AssocSegregator(RecessiveFilter):
                  sv_max_control_dp=0, sv_min_control_gq=None,
                  sv_control_het_ab=None, sv_control_hom_ab=None,
                  sv_con_ref_ab=None, min_families=1, strict=False,
-                 exclude_denovo=False, report_file=None):
+                 exclude_denovo=False, report_file=None, max_incidentals=0):
         super().__init__(family_filter, gq=gq, dp=dp, max_dp=max_dp,
                          het_ab=het_ab, hom_ab=hom_ab,
                          min_control_dp=min_control_dp,
@@ -74,6 +86,7 @@ class AssocSegregator(RecessiveFilter):
                 type(self).__name__)),]
         self.annot_fields = ('homozygous', 'compound_het', 'de_novo',
                             'families', 'features')
+        self.max_incidentals = max_incidentals
 
     def process_potential_recessives(self, assoc_alleles, final=False):
         '''
@@ -102,6 +115,8 @@ class AssocSegregator(RecessiveFilter):
 
         '''
         segregating = OrderedDict() #keys are alt_ids, values are SegregatingBiallelic
+        comp_hets = defaultdict(dict) # store compound hets per feature per
+                                      # family for checking max_incidentals
         for feat, prs in self._potential_recessives.items():
             if not final and feat in self._last_added:
                 continue
@@ -168,11 +183,17 @@ class AssocSegregator(RecessiveFilter):
                                 model = 'homozygous'
                             else:
                                 model = 'compound_het'
+                                if fid not in comp_hets[feat]:
+                                    comp_hets[feat][fid] = list()
+                                comp_hets[feat][fid].append(bi)
                             for bi_pr in (prs[x] for x in bi):
                                 feat_segregating.append((bi_pr, affs, [fid],
                                                          model, [feat],
                                                          de_novo[bi_pr.alt_id],
                                                          self.prefix))
+            if self.max_incidentals:
+                feat_segregating = self._filter_incidentals(feat_segregating,
+                                                            comp_hets)
             fam_count = len(set([fam for tup in feat_segregating for fam in
                                  tup[2]]))
             if fam_count >= self.min_families:
@@ -192,6 +213,53 @@ class AssocSegregator(RecessiveFilter):
         self._potential_recessives = self._last_added
         self._last_added = dict()
         return var_to_segregants
+
+    def _filter_incidentals(self, feat_segregating, comp_hets):
+        filtered_segregating = []
+        filtered = False
+        alt2affs = defaultdict(list)
+        alt2fams = defaultdict(list)
+        for ft in feat_segregating:
+            #each alt may occur more than once under different model or family
+            alt2affs[ft[0].alt_id].extend(ft[1])
+            alt2fams[ft[0].alt_id].extend(ft[2])
+        for ft in feat_segregating:
+            incidental_affs = (k for k,v in ft[0].allele_counts.items() if k
+                               not in alt2affs[ft[0].alt_id] and k in
+                               self.ped.individuals and v)
+            incidentals = set(self.ped.fid_from_iid(x) for x in incidental_affs
+                              if self.ped.fid_from_iid(x) not in
+                              alt2fams[ft[0].alt_id])
+            if len(incidentals) < self.max_incidentals:
+                filtered_segregating.append(ft)
+            else:
+                filtered = True
+        if not filtered:
+            return feat_segregating
+        #reassess compound hets after filtering
+        still_segregating = []
+        hets = defaultdict(list)
+        for ft in filtered_segregating:
+            if ft[3] == 'homozygous':
+                still_segregating.append(ft)
+            else:
+                for fam in ft[2]:
+                    hets[fam].append(ft)
+        for fam,het_list in hets.items():
+            c_het_indices = set()
+            for i in range(len(het_list)):
+                combis = []
+                for feat in het_list[i][4]:
+                    combis.extend(comp_hets[feat][fam])
+                for j in range(i+1, len(het_list)):
+                    a_i = het_list[i][0].alt_id
+                    a_j = het_list[j][0].alt_id
+                    if (a_i, a_j) in combis or (a_j, a_i) in combis:
+                        c_het_indices.add(i)
+                        c_het_indices.add(j)
+            for k in sorted(c_het_indices):
+                still_segregating.append(het_list[k])
+        return still_segregating
 
 
 def main(args):
@@ -226,7 +294,8 @@ def main(args):
                                        dp=args.dp,
                                        max_dp=args.max_dp,
                                        min_families=args.min_families,
-                                       het_ab=args.het_ab)
+                                       het_ab=args.het_ab,
+                                       max_incidentals=args.max_incidentals)
     #VepFilter for non-association hits (i.e. functional second hits)
     csq_filter = VepFilter(vcf=vcfreader,
                            csq=args.csq,
@@ -459,6 +528,16 @@ def write_vcf_header(vcf, fh, assoc_seg):
     fh.write(str(vcf.header))
 
 def get_options():
+    biotype_default = ['3prime_overlapping_ncrna', 'antisense',
+                        'CTCF_binding_site', 'enhancer', 'lincRNA',
+                        'miRNA', 'misc_RNA', 'Mt_rRNA', 'Mt_tRNA',
+                        'open_chromatin_region', 'polymorphic_pseudogene',
+                        'processed_transcript', 'promoter',
+                        'promoter_flanking_region', 'protein_coding', 'rRNA',
+                        'sense_intronic', 'sense_overlapping', 'snoRNA',
+                        'snRNA', 'TF_binding_site',
+                        'translated_processed_pseudogene', 'TR_C_gene',
+                        'TR_D_gene', 'TR_J_gene', 'TR_V_gene']
     parser = argparse.ArgumentParser(description='''
             Find genes with an association hit on one allele and an allele
             matching consequence requirements on the other.''')
@@ -489,6 +568,13 @@ def get_options():
                         be read from existing VASE and VEP annotations.
                         Variant alleles with an allele frequency equal to or
                         greater than this value will be filtered.''')
+    parser.add_argument('--max_incidentals', type=int, default=0, help=
+                        '''Maximum number of families with an individual that
+                        carries one allele of a biallelic variant without
+                        having a second qualifying variant. Useful for
+                        filtering out implausibly common alleles that by chance
+                        segregate in a subset of families. Default=0 (i.e. not
+                        applied).''')
     parser.add_argument('--gq', type=int, default=20, help=
                          '''Minimum genotype quality score threshold. Sample
                          genotype calls with a score lower than this threshold
@@ -533,20 +619,10 @@ def get_options():
     parser.add_argument('--flagged_features', action='store_true', help=
                         '''Ignore consequences for flagged transcripts/features
                         (i.e. with a non-empty 'FLAGS' CSQ field).''')
-    parser.add_argument('--biotypes',  nargs='+', default=[],
+    parser.add_argument('--biotypes',  nargs='+', default=biotype_default,
                         metavar='BIOTYPE', help='''Ignore consequences in
                         biotypes other than those specified here. Default =
-                        ['3prime_overlapping_ncrna', 'antisense',
-                        'CTCF_binding_site', 'enhancer', 'IG_C_gene',
-                        'IG_D_gene', 'IG_J_gene', 'IG_V_gene', 'lincRNA',
-                        'miRNA', 'misc_RNA', 'Mt_rRNA', 'Mt_tRNA',
-                        'open_chromatin_region', 'polymorphic_pseudogene',
-                        'processed_transcript', 'promoter',
-                        'promoter_flanking_region', 'protein_coding', 'rRNA',
-                        'sense_intronic', 'sense_overlapping', 'snoRNA',
-                        'snRNA', 'TF_binding_site',
-                        'translated_processed_pseudogene', 'TR_C_gene',
-                        'TR_D_gene', 'TR_J_gene', 'TR_V_gene']''')
+                        {}'''.format(biotype_default))
     parser.add_argument('--feature_blacklist', '--blacklist', help=
                         '''A file containing a list of Features (e.g. Ensembl
                         transcript IDs) to ignore. These must correspond
