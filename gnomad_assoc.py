@@ -25,7 +25,10 @@ formatter = logging.Formatter(
 ch.setFormatter(formatter)
 logger.addHandler(ch)
 prog_string = ''
+
 g_columns = ['alt', 'non_alt', 'P', 'OR',]
+
+sex_chr_re = re.compile(r'^(chr)?([XY])')
 
 class CovAnalyzer(object):
     """
@@ -34,7 +37,8 @@ class CovAnalyzer(object):
     """
 
     def __init__(self, coverage_files=[], coverage_directory=None,
-                 dp_cutoff=10, pops_file=None, cohort="Exomes"):
+                 dp_cutoff=10, pops_file=None, cohort="Exomes",
+                 genders_file=None):
         """
             Find valid coverage files in coverage_directory and determine
             what coverage cutoff to use (bisect available coverage
@@ -61,6 +65,7 @@ class CovAnalyzer(object):
             sys.exit("Invalid cohort '{}' for CovAnalyzer".format(cohort)+
                      "valid types are {}.".format(", ".join(valid_types)))
         self.cohort = cohort
+        self.fraction_xy = self._get_xy_fraction(genders_file)
 
     def samples_at_site(self, contig, pos):
         frac = self.search_coordinates(contig, pos)
@@ -102,6 +107,19 @@ class CovAnalyzer(object):
                 for x in ["Exomes", "Genomes", "Total"]:
                     counts[pop][x] = int(row[cols[x]])
         return counts
+
+    def _read_genders(self, gender_file):
+        if gender_file is None:
+            gender_file = os.path.join(os.path.dirname(__file__),
+                                       "data",
+                                       "genders.2.1.tsv")
+        return self._read_pops(gender_file)
+
+    def _get_xy_fraction(self, gender_file):
+        gender_counts = self._read_genders(gender_file)
+        xx = gender_counts['female'][self.cohort]
+        xy = gender_counts['male'][self.cohort]
+        return float(xy)/(xx + xy)
 
     def _get_next_dp(self, dp, thresholds):
         thresholds.sort()
@@ -367,10 +385,40 @@ def update_progress(n, record, log=False):
         sys.stderr.write(prog_string)
     prog_string = n_prog_string
 
+def count_alleles(i, gts, gt_filter, indvs, max_one_per_sample, chromosome,
+                  xx_samples, xy_samples, no_gender):
+    sex_match = sex_chr_re.match(chromosome)
+    if max_one_per_sample:
+        alts = sum(1 for s in indvs if gt_filter.gt_is_ok(gts, s, i)
+                   and i in gts['GT'][s])
+    elif sex_match:
+        alts = sum(1 for s in no_gender if gt_filter.gt_is_ok(gts, s, i)
+                   and i in gts['GT'][s])
+        alts += sum(1 for s in xy_samples if gt_filter.gt_is_ok(gts, s, i)
+                   and i in gts['GT'][s])
+        if sex_match.group(2) == 'X':
+            alts += sum((gts['GT'][s].count(i)) for s in xx_samples if
+                       gt_filter.gt_is_ok(gts, s, i) and i in gts['GT'][s])
+    else:
+        alts = sum((gts['GT'][s].count(i)) for s in indvs if
+                   gt_filter.gt_is_ok(gts, s, i) and i in gts['GT'][s])
+    if sex_match:
+        #TODO - rethink this fudge for samples without gender
+        chroms = sum(2 for s in no_gender if gt_filter.gt_is_ok(gts, s, i))
+        chroms += sum(1 for s in xy_samples if gt_filter.gt_is_ok(gts, s, i))
+        if sex_match.group(2) == 'X':
+            chroms += sum(2 for s in xx_samples if gt_filter.gt_is_ok(gts, s,
+                                                                      i))
+    else:
+        chroms = sum(2 for s in gts['GT'] if gt_filter.gt_is_ok(gts, s, i))
+    refs = chroms - alts
+    return refs, alts
+
 def process_variant(record, gnomad_filters, p_value, pops, gts, gt_filter,
                     table_out, vcf_out, cov_analyzers=dict(), pop_ids=None,
                     max_one_per_sample=False, families=None,
-                    require_all_p_values=False):
+                    require_all_p_values=False, xx_samples=None,
+                    xy_samples=None, no_gender=None):
     cohort_covered = dict()
     cov_ok = False
     alt_ref_counts = []
@@ -384,15 +432,9 @@ def process_variant(record, gnomad_filters, p_value, pops, gts, gt_filter,
             indvs = _one_individual_per_fam(gts, gt_filter, i, families)
         else:
             indvs = [x for x in gts['GT']]
-        if max_one_per_sample:
-            alts = sum(1 for s in indvs if gt_filter.gt_is_ok(gts, s, i)
-                       and i in gts['GT'][s])
-        else:
-            alts= sum((gts['GT'][s].count(i)) for s in indvs if
-                       gt_filter.gt_is_ok(gts, s, i) and i in gts['GT'][s])
-        #TODO rethink for sex chromosomes
-        chroms = sum(2 for s in gts['GT'] if gt_filter.gt_is_ok(gts, s, i))
-        refs = chroms - alts
+        refs, alts = count_alleles(i, gts, gt_filter, indvs, max_one_per_sample,
+                                   record.CHROM, xx_samples, xy_samples,
+                                   no_gender)
         alt_ref_counts.append([alts, refs])
     g_cohort_to_counts = defaultdict(list) #dict of pops -> [AC,AN]
     for c in ['Exomes', 'Genomes']:
@@ -417,7 +459,14 @@ def process_variant(record, gnomad_filters, p_value, pops, gts, gt_filter,
                 ac,an = 0,0
                 if not annot: #no matching variant in gnomad VCF
                     if p in covered:
-                        an = covered[p]
+                        xy_match = sex_chr_re.match(record.CHROM)
+                        if xy_match:
+                            an = int(cov_analyzers[c].fraction_xy * covered[p])
+                            if xy_match.group(2) == 'X':
+                                xx = covered[p] - an
+                                an += xx * 2
+                        else:
+                            an = 2 * covered[p]
                 else:
                     ac = int(annot['AC_' + p])
                     an = int(annot['AN_' + p])
@@ -481,6 +530,8 @@ def main(vcf_input, genomes=None, exomes=None, table_output=None,
             sys.exit("Missing {} user specified samples".format(len(missing)) +
                      " in VCF ({}).".format(", ".join(missing)))
     families = None
+    xx_samples = []
+    xy_samples = []
     if ped is not None:
         pedfile = PedFile(ped)
         samples = [aff for aff in pedfile.get_affected() if aff in samples]
@@ -489,6 +540,10 @@ def main(vcf_input, genomes=None, exomes=None, table_output=None,
         families = defaultdict(list)
         for fid, fam in pedfile.families.items():
             families[fid].extend(x for x in fam.get_affected() if x in samples)
+        xy_samples = [x for x in pedfile.get_males() if x in samples]
+        xx_samples = [x for x in pedfile.get_females() if x in samples]
+    no_gender = [x for x in samples if x not in xx_samples and x not in
+                 xy_samples]
     gt_filter = GtFilter(vcfreader, gq=gq, dp=dp, max_dp=max_dp, het_ab=het_ab,
                          hom_ab=hom_ab)
     gt_fields = gt_filter.fields
@@ -551,7 +606,9 @@ def main(vcf_input, genomes=None, exomes=None, table_output=None,
                         vcf_out=vcf_writer, p_value=p_value,
                         gt_filter=gt_filter, families=families,
                         require_all_p_values=require_all_p_values,
-                        max_one_per_sample=max_one_per_sample)
+                        max_one_per_sample=max_one_per_sample,
+                        xx_samples=xx_samples, xy_samples=xy_samples,
+                        no_gender=no_gender)
         n += 1
         if n % progress_interval == 0:
             update_progress(n, record, log_progress)
