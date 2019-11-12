@@ -38,7 +38,7 @@ class CovAnalyzer(object):
 
     def __init__(self, coverage_files=[], coverage_directory=None,
                  dp_cutoff=10, pops_file=None, cohort="Exomes",
-                 genders_file=None):
+                 gnomad_version='3.0', genders_file=None):
         """
             Find valid coverage files in coverage_directory and determine
             what coverage cutoff to use (bisect available coverage
@@ -54,6 +54,7 @@ class CovAnalyzer(object):
         formatter = logging.Formatter(
                '[%(asctime)s] %(name)s - %(levelname)s - %(message)s')
         ch.setFormatter(formatter)
+        self.gnomad_version = gnomad_version
         self.file_to_dp = dict()    #cov column to use for each coverage file
         self.file_to_tbx = dict() #tabix iters for searching by coordinate
         self._collect_cov_files(coverage_files, coverage_directory, dp_cutoff)
@@ -98,7 +99,7 @@ class CovAnalyzer(object):
         if pop_file is None:
             pop_file = os.path.join(os.path.dirname(__file__),
                                     "data",
-                                    "pops.2.1.tsv")
+                                    "pops.{}.tsv".format(self.gnomad_version))
         with open(pop_file, 'rt') as infile:
             header = next(infile)
             cols = self._columns_from_header(header)
@@ -199,6 +200,18 @@ def get_options():
                         all variants will be written to this file with counts
                         and p-values annotated. If the filename ends with '.gz'
                         it will automatically compressed with bgzip.''')
+    parser.add_argument("--pop_counts", metavar='FILE', help='''Tab delimited
+                        file giving the number of exome and genome samples per
+                        population. This is used with exome and genome coverage
+                        files to infer the number of samples with likely
+                        reference genotypes at sites without a variant called
+                        in gnomAD VCF files. See the ".tsv" files in the data/
+                        directory for examples.''')
+    parser.add_argument("--gnomad_version", metavar='VERSION', default="3.0",
+                        help='''gnomAD data version. This setting simply
+                        chooses the default file used for sample counts per
+                        population if --pop_counts is not set and exome/genome
+                        coverage data is being used.''')
     parser.add_argument("--exome_coverage_files", nargs='+', help='''One or
                         more coverage summary files for Exome cohorts. Coverage
                         files must be sorted, bgzip compressed and tabix
@@ -529,10 +542,12 @@ def process_variant(record, gnomad_filters, p_value, pops, gts, gt_filter,
             all_pvals.append(pval)
         if vcf_out:
             per_allele_results.append(results[5:])
-        if test_combined_pops_only and pval <= p_value:
-            table_out.write("\t".join((str(x) for x in results)) + "\n")
-        elif all_pvals and p_check(x <= p_value for x in all_pvals):
-            table_out.write("\t".join((str(x) for x in results)) + "\n")
+        if test_combined_pops_only:
+            if pval <= p_value:
+                table_out.write("\t".join((str(x) for x in results)) + "\n")
+        else:
+            if all_pvals and p_check(x <= p_value for x in all_pvals):
+                table_out.write("\t".join((str(x) for x in results)) + "\n")
     if vcf_out:
         write_record(vcf_out, record, per_allele_results, pop_ids + ['all'])
 
@@ -540,10 +555,11 @@ def main(vcf_input, genomes=None, exomes=None, table_output=None,
          vcf_output=None, pops=None, samples=None, bed=None, p_value=0.05,
          dp_cutoff=10, exome_coverage_dir=None, genome_coverage_dir=None,
          exome_coverage_files=None, genome_coverage_files=None,
-         gq=20, dp=5, max_dp=250, het_ab=0.25, hom_ab=0.95, ped=None,
-         test_combined_pops=False, test_combined_pops_only=False,
-         require_all_p_values=False, max_one_per_sample=False,
-         count_no_calls=False, progress_interval=1000, log_progress=False):
+         gnomad_version='3.0', pop_counts=None, gq=20, dp=5, max_dp=250,
+         het_ab=0.25, hom_ab=0.95, ped=None, test_combined_pops=False,
+         test_combined_pops_only=False, require_all_p_values=False,
+         max_one_per_sample=False, count_no_calls=False,
+         progress_interval=1000, log_progress=False):
     if genomes is None and exomes is None:
         sys.exit('''At least one of --genomes or --exomes arguments must be
                  provided.''')
@@ -612,6 +628,8 @@ def main(vcf_input, genomes=None, exomes=None, table_output=None,
             cov_analyzers[cohort] = CovAnalyzer(coverage_files=cov_files,
                                                 coverage_directory=cov_dir,
                                                 dp_cutoff=dp_cutoff,
+                                                gnomad_version=gnomad_version,
+                                                pops_file=pop_counts,
                                                 cohort=cohort)
         cohort_pops[cohort] = sorted(list(these_pops))
     all_pops = sorted(set(p for x in cohort_pops.values() for p in x))
