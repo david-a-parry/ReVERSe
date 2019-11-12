@@ -158,7 +158,7 @@ class CovAnalyzer(object):
 
     def _cov_file_ok(self, f, dp):
         if os.path.isfile(f):
-            o_func = gzip.open if f.endswith('.gz') else open
+            o_func = gzip.open if f.endswith(('.gz', '.bgz')) else open
             try:
                 with o_func(f, 'rt') as infile:
                     for line in infile:
@@ -188,6 +188,7 @@ class CovAnalyzer(object):
 def get_options():
     parser = argparse.ArgumentParser(description='''
             Do a crude association test against gnomAD VCF file(s).''')
+    comgrp = parser.add_mutually_exclusive_group()
     parser.add_argument("-i", "--vcf_input", "--vcf", required=True,
                         help='Input VCF file')
     parser.add_argument("-e", "--exomes", help='gnomAD exomes VCF file')
@@ -230,14 +231,30 @@ def get_options():
     parser.add_argument("-s", "--samples", nargs='+', help='''One or more
                         samples to process. Defaults to all samples in input
                         file.''')
+    parser.add_argument("--count_no_calls", action='store_true', help='''Count
+                        chromosomes of samples even when they do not have a
+                        called genotype for a variant or if they fail quality
+                        filters. Default behaviour is to only count the number
+                        of samples with a called genotype when calculating the
+                        total number of chromosomes for a variant. This is
+                        meant as a workaround where samples in your VCF were
+                        not joint-called but instead merged together after
+                        variant calling.''')
     parser.add_argument("-b", "--bed", help='''Restrict analysis to regions in
                         this BED format file.''')
     parser.add_argument("--p_value", type=float, default=0.05,
                         help='''Only output variants with a p-value equal to or
                         lower than this value. Default=0.05''')
-    parser.add_argument("--require_all_p_values", action='store_true',
+    comgrp.add_argument("--require_all_p_values", action='store_true',
                         help='''Require the p-value to be under threshold for
                         all populations rather than just one.''')
+    parser.add_argument("--test_combined_pops", action='store_true',
+                        help='''Check --p-value threshold against combined
+                        counts for all populations (see --pops) in addition to
+                        individual populations.''')
+    comgrp.add_argument("--test_combined_pops_only", action='store_true',
+                        help='''Check --p-value threshold against combined
+                        counts for all populations (see --pops) only.''')
     parser.add_argument("--max_one_per_sample", action='store_true',
                         help='''Only count one allele per sample irrespective
                         of whether they are homozygous or heterozygous.''')
@@ -386,7 +403,13 @@ def update_progress(n, record, log=False):
     prog_string = n_prog_string
 
 def count_alleles(i, gts, gt_filter, indvs, max_one_per_sample, chromosome,
-                  xx_samples, xy_samples, no_gender):
+                  xx_samples, xy_samples, no_gender, count_no_calls=False):
+    if count_no_calls:
+        chrom_check = lambda x,y,z: True
+    else:
+        chrom_check = lambda x,y,z: (gt_filter.gt_is_ok(x, y, z) and
+                                     gts['GT'][y] != (None,) *
+                                     len(gts['GT'][y]))
     sex_match = sex_chr_re.match(chromosome)
     if max_one_per_sample:
         alts = sum(1 for s in indvs if gt_filter.gt_is_ok(gts, s, i)
@@ -404,21 +427,21 @@ def count_alleles(i, gts, gt_filter, indvs, max_one_per_sample, chromosome,
                    gt_filter.gt_is_ok(gts, s, i) and i in gts['GT'][s])
     if sex_match:
         #TODO - rethink this fudge for samples without gender
-        chroms = sum(2 for s in no_gender if gt_filter.gt_is_ok(gts, s, i))
-        chroms += sum(1 for s in xy_samples if gt_filter.gt_is_ok(gts, s, i))
+        chroms = sum(2 for s in no_gender if chrom_check(gts, s, i))
+        chroms += sum(1 for s in xy_samples if chrom_check(gts, s, i))
         if sex_match.group(2) == 'X':
-            chroms += sum(2 for s in xx_samples if gt_filter.gt_is_ok(gts, s,
-                                                                      i))
+            chroms += sum(2 for s in xx_samples if chrom_check(gts, s, i))
     else:
-        chroms = sum(2 for s in gts['GT'] if gt_filter.gt_is_ok(gts, s, i))
+        chroms = sum(2 for s in indvs if chrom_check(gts, s, i))
     refs = chroms - alts
     return refs, alts
 
 def process_variant(record, gnomad_filters, p_value, pops, gts, gt_filter,
                     table_out, vcf_out, cov_analyzers=dict(), pop_ids=None,
                     max_one_per_sample=False, families=None,
+                    test_combined_pops=False, test_combined_pops_only=False,
                     require_all_p_values=False, xx_samples=None,
-                    xy_samples=None, no_gender=None):
+                    xy_samples=None, no_gender=None, count_no_calls=False):
     cohort_covered = dict()
     cov_ok = False
     alt_ref_counts = []
@@ -434,7 +457,7 @@ def process_variant(record, gnomad_filters, p_value, pops, gts, gt_filter,
             indvs = [x for x in gts['GT']]
         refs, alts = count_alleles(i, gts, gt_filter, indvs, max_one_per_sample,
                                    record.CHROM, xx_samples, xy_samples,
-                                   no_gender)
+                                   no_gender, count_no_calls=count_no_calls)
         alt_ref_counts.append([alts, refs])
     g_cohort_to_counts = defaultdict(list) #dict of pops -> [AC,AN]
     for c in ['Exomes', 'Genomes']:
@@ -502,9 +525,13 @@ def process_variant(record, gnomad_filters, p_value, pops, gts, gt_filter,
                                                         total_an-total_ac)],
                                         alternative='greater')
         results.extend([total_ac, total_an - total_ac, pval, odds])
+        if test_combined_pops:
+            all_pvals.append(pval)
         if vcf_out:
             per_allele_results.append(results[5:])
-        if all_pvals and p_check(x <= p_value for x in all_pvals):
+        if test_combined_pops_only and pval <= p_value:
+            table_out.write("\t".join((str(x) for x in results)) + "\n")
+        elif all_pvals and p_check(x <= p_value for x in all_pvals):
             table_out.write("\t".join((str(x) for x in results)) + "\n")
     if vcf_out:
         write_record(vcf_out, record, per_allele_results, pop_ids + ['all'])
@@ -514,8 +541,9 @@ def main(vcf_input, genomes=None, exomes=None, table_output=None,
          dp_cutoff=10, exome_coverage_dir=None, genome_coverage_dir=None,
          exome_coverage_files=None, genome_coverage_files=None,
          gq=20, dp=5, max_dp=250, het_ab=0.25, hom_ab=0.95, ped=None,
+         test_combined_pops=False, test_combined_pops_only=False,
          require_all_p_values=False, max_one_per_sample=False,
-         progress_interval=1000, log_progress=False):
+         count_no_calls=False, progress_interval=1000, log_progress=False):
     if genomes is None and exomes is None:
         sys.exit('''At least one of --genomes or --exomes arguments must be
                  provided.''')
@@ -595,7 +623,7 @@ def main(vcf_input, genomes=None, exomes=None, table_output=None,
         write_vcf_header(vcfreader, vcf_writer, all_pops)
     header = ["#chrom", "pos", "id", "ref", "alt", "cases_alt", "cases_ref"]
     header.extend([x + "_alt\t" + x + "_ref\t" + x + "_p\t"  + x + "_odds" for
-                   x in all_pops])
+                   x in all_pops + ['total']])
     out_fh.write("\t".join(header) + "\n")
     n = 0
     for record in varstream:
@@ -604,11 +632,14 @@ def main(vcf_input, genomes=None, exomes=None, table_output=None,
                         pops=cohort_pops, pop_ids=all_pops,
                         cov_analyzers=cov_analyzers, gts=gts, table_out=out_fh,
                         vcf_out=vcf_writer, p_value=p_value,
-                        gt_filter=gt_filter, families=families,
+                        gt_filter=gt_filter,
+                        families=families,
+                        test_combined_pops=test_combined_pops,
+                        test_combined_pops_only=test_combined_pops_only,
                         require_all_p_values=require_all_p_values,
                         max_one_per_sample=max_one_per_sample,
                         xx_samples=xx_samples, xy_samples=xy_samples,
-                        no_gender=no_gender)
+                        no_gender=no_gender, count_no_calls=count_no_calls)
         n += 1
         if n % progress_interval == 0:
             update_progress(n, record, log_progress)
