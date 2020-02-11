@@ -47,23 +47,24 @@ class AssocSegregator(RecessiveFilter):
         super().__init__(family_filter, gt_args, min_families=min_families,
                          report_file=report_file,)
         self.prefix = "gassoc_biallelic"
-        self.header_fields = [("gassoc_biallelic_homozygous",
-               '"Samples that carry homozygous biallelic changes ' +
-               ' parsed by {}"' .format(type(self).__name__)),
-               ("gassoc_biallelic_compound_het",
-               '"Samples that carry compound heterozygous biallelic changes ' +
-               'parsed by {}"'.format(type(self).__name__)),
-               ("gassoc_biallelic_de_novo",
-               '"Samples that carry biallelic alleles that appear to have ' +
-               'arisen de novo"'),
-                ('gassoc_biallelic_families',
-                '"Family IDs for gassoc_biallelic alleles"'),
-               ("gassoc_biallelic_features",
-               '"Features (e.g. transcripts) that contain qualifying ' +
-               'biallelic variants parsed by {}"' .format(
-                type(self).__name__)),]
+        self.header_fields = [
+            ("gassoc_biallelic_homozygous",
+             '"Samples that carry homozygous biallelic changes ' +
+             ' parsed by {}"' .format(type(self).__name__)),
+            ("gassoc_biallelic_compound_het",
+             '"Samples that carry compound heterozygous biallelic changes ' +
+             'parsed by {}"'.format(type(self).__name__)),
+            ("gassoc_biallelic_de_novo",
+             '"Samples that carry biallelic alleles that appear to have ' +
+             'arisen de novo"'),
+            ('gassoc_biallelic_families',
+             '"Family IDs for gassoc_biallelic alleles"'),
+            ("gassoc_biallelic_features",
+             '"Features (e.g. transcripts) that contain qualifying ' +
+             'biallelic variants parsed by {}"' .format(
+                 type(self).__name__)), ]
         self.annot_fields = ('homozygous', 'compound_het', 'de_novo',
-                            'families', 'features')
+                             'families', 'features')
         self.max_incidentals = max_incidentals
 
     def process_potential_recessives(self, assoc_alleles, final=False):
@@ -92,20 +93,20 @@ class AssocSegregator(RecessiveFilter):
                         been encountered.
 
         '''
-        segregating = OrderedDict() #keys are alt_ids, values are SegregatingBiallelic
-        comp_hets = defaultdict(dict) # store compound hets per feature per
-                                      # family for checking max_incidentals
+        segregating = OrderedDict()  # keys are alt_ids, values are SegregatingBiallelic
+        comp_hets = defaultdict(dict)  # compound hets per feature per
+                                       # family for checking max_incidentals
         for feat, prs in self._potential_recessives.items():
             if not final and feat in self._current_features:
                 continue
-            feat_segregating = [] #list of tuples of values for creating SegregatingBiallelic
-            un_hets = defaultdict(list)  #store het alleles carried by each unaffected
-            aff_hets = defaultdict(list) #store het alleles carried by each affected
-            biallelics = defaultdict(list)  #store biallelic combinations for affecteds
-            for pid,p in prs.items():
+            feat_segregating = []  # tuples of values for SegregatingBiallelic
+            un_hets = defaultdict(list)  # het alleles carried by unaffected
+            aff_hets = defaultdict(list)  # het alleles carried by affected
+            biallelics = defaultdict(list)  # biallelic combinations for affs
+            for pid, p in prs.items():
                 for un in self.unaffected:
-                    if p.allele_counts[un] == 1:  #already checked for homs when adding
-                        #store allele carried in this unaffected
+                    if p.allele_counts[un] == 1:  # checked for homs when adding
+                        # store allele carried in this unaffected
                         un_hets[un].append(pid)
                 for aff in (x for x in self.affected
                             if self.ped.fid_from_iid(x) in p.families):
@@ -114,11 +115,11 @@ class AssocSegregator(RecessiveFilter):
                     elif p.allele_counts[aff] == 2:
                         if pid in assoc_alleles:
                             biallelics[aff].append(tuple([pid]))
-            incompatibles = [] #create a list of sets of incompatible hets
+            incompatibles = []  # create a list of sets of incompatible hets
             for hets in un_hets.values():
                 if len(hets):
                     incompatibles.append(set(hets))
-            for aff,hets in aff_hets.items():
+            for aff, hets in aff_hets.items():
                 for i in range(len(hets)):
                     for j in range(i+1, len(hets)):
                         incomp = False
@@ -129,19 +130,19 @@ class AssocSegregator(RecessiveFilter):
                         if incomp:
                             continue
                         if prs[hets[i]].record.in_cis_with(
-                            sample=aff,
-                            allele=prs[hets[i]].allele,
-                            other=prs[hets[j]].record,
-                            other_allele=prs[hets[j]].allele):
-                            #phase groups indicate alleles in cis
+                                sample=aff,
+                                allele=prs[hets[i]].allele,
+                                other=prs[hets[j]].record,
+                                other_allele=prs[hets[j]].allele):
+                            # phase groups indicate alleles in cis
                             continue
                         if (hets[i] in assoc_alleles or hets[j] in
                                 assoc_alleles):
-                                biallelics[aff].append(tuple([hets[i],hets[j]]))
+                            biallelics[aff].append(tuple([hets[i], hets[j]]))
             if not biallelics:
                 continue
-            #see if all affecteds in the same family share the same biallelics
-            for fid,affs in self._fam_to_aff.items():
+            # see if all affecteds in the same family share the same biallelics
+            for fid, affs in self._fam_to_aff.items():
                 b_affs = set(x for x in affs if x in biallelics)
                 if len(b_affs) == 0 or b_affs != affs:
                     continue
@@ -154,7 +155,7 @@ class AssocSegregator(RecessiveFilter):
                                 absent_in_aff = True
                                 break
                         if not absent_in_aff:
-                            segs,de_novo = self._check_parents(feat, bi, affs)
+                            segs, de_novo = self._check_parents(feat, bi, affs)
                             if not segs:
                                 continue
                             if len(bi) == 1:
@@ -187,7 +188,7 @@ class AssocSegregator(RecessiveFilter):
                 var_to_segregants[sb.segregant.var_id].append(sb.segregant)
             else:
                 var_to_segregants[sb.segregant.var_id] = [sb.segregant]
-        #clear the cache except for the last entry which will be a new gene
+        # clear the cache except for the last entry which will be a new gene
         self._potential_recessives = OrderedDict(
             (k, v) for k, v in self._potential_recessives.items() if k in
             self._current_features)
@@ -199,11 +200,11 @@ class AssocSegregator(RecessiveFilter):
         alt2affs = defaultdict(list)
         alt2fams = defaultdict(list)
         for ft in feat_segregating:
-            #each alt may occur more than once under different model or family
+            # each alt may occur more than once under different model or family
             alt2affs[ft[0].alt_id].extend(ft[1])
             alt2fams[ft[0].alt_id].extend(ft[2])
         for ft in feat_segregating:
-            incidental_affs = (k for k,v in ft[0].allele_counts.items() if k
+            incidental_affs = (k for k, v in ft[0].allele_counts.items() if k
                                not in alt2affs[ft[0].alt_id] and k in
                                self.ped.individuals and v)
             incidentals = set(self.ped.fid_from_iid(x) for x in incidental_affs
@@ -215,7 +216,7 @@ class AssocSegregator(RecessiveFilter):
                 filtered = True
         if not filtered:
             return feat_segregating
-        #reassess compound hets after filtering
+        # reassess compound hets after filtering
         still_segregating = []
         hets = defaultdict(list)
         for ft in filtered_segregating:
@@ -224,7 +225,7 @@ class AssocSegregator(RecessiveFilter):
             else:
                 for fam in ft[2]:
                     hets[fam].append(ft)
-        for fam,het_list in hets.items():
+        for fam, het_list in hets.items():
             c_het_indices = set()
             for i in range(len(het_list)):
                 combis = []
@@ -257,7 +258,7 @@ def main(args):
     freq_fields = []
     if args.freq:
         freq_fields = get_vase_freq_annots(vcfreader)
-    allele_filters = [] #lambdas for filtering alleles for non-hit ALTs
+    allele_filters = []  # lambdas for filtering alleles for non-hit ALTs
     if args.cadd_phred:
         if 'CADD_PHRED_score' not in vcfreader.metadata['INFO']:
             sys.exit("No pre-exisiting CADD_PHRED_score INFO annotation in " +
@@ -277,28 +278,29 @@ def main(args):
                                        gt_args,
                                        min_families=args.min_families,
                                        max_incidentals=args.max_incidentals)
-    #VepFilter for non-association hits (i.e. functional second hits)
-    csq_filter = VepFilter(vcf=vcfreader,
-                           csq=args.csq,
-                           impact=args.impact,
-                           canonical=args.canonical,
-                           biotypes=args.biotypes,
-                           in_silico=args.missense_filters,
-                           filter_unpredicted=args.filter_unpredicted,
-                           keep_any_damaging=args.keep_if_any_damaging,
-                           loftee=args.loftee,
-                           splice_in_silico=args.splice_filters,
-                           splice_filter_unpredicted=args.splice_filter_unpredicted,
-                           splice_keep_any_damaging=args.splice_keep_if_any_damaging,
-                           retain_labels=args.retain_labels,
-                           filter_flagged_features=args.flagged_features,
-                           freq=args.freq,
-                           afs=args.vep_af,
-                           blacklist=args.feature_blacklist,
-                           pathogenic=args.pathogenic,
-                           no_conflicted=args.no_conflicted,
-                           logging_level=logger.level)
-    #VepFilter for association hits - check biotype, frequency etc. but not csq
+    # VepFilter for non-association hits (i.e. functional second hits)
+    csq_filter = VepFilter(
+        vcf=vcfreader,
+        csq=args.csq,
+        impact=args.impact,
+        canonical=args.canonical,
+        biotypes=args.biotypes,
+        in_silico=args.missense_filters,
+        filter_unpredicted=args.filter_unpredicted,
+        keep_any_damaging=args.keep_if_any_damaging,
+        loftee=args.loftee,
+        splice_in_silico=args.splice_filters,
+        splice_filter_unpredicted=args.splice_filter_unpredicted,
+        splice_keep_any_damaging=args.splice_keep_if_any_damaging,
+        retain_labels=args.retain_labels,
+        filter_flagged_features=args.flagged_features,
+        freq=args.freq,
+        afs=args.vep_af,
+        blacklist=args.feature_blacklist,
+        pathogenic=args.pathogenic,
+        no_conflicted=args.no_conflicted,
+        logging_level=logger.level)
+    # VepFilter for association hits - check biotype, frequency etc but not csq
     no_csq_filter = VepFilter(vcf=vcfreader,
                               csq=['all'],
                               canonical=args.canonical,
@@ -316,7 +318,7 @@ def main(args):
         vcf_writer = open(args.output, 'w')
     any_or_all = any if args.allow_any_pop else all
     write_vcf_header(vcfreader, vcf_writer, assoc_segregator)
-    n,w = 0,0
+    n, w = 0, 0
     assoc_alts = list()
     for record in vcfreader:
         assocs = process_record(record, variant_cache=variant_cache,
@@ -347,6 +349,7 @@ def main(args):
     if vcf_writer is not sys.stdout:
         vcf_writer.close()
 
+
 def process_cache(cache, assoc_alts, assoc_segregator, pval, min_alleles,
                   assoc_fields, outfh, final=False):
     written = 0
@@ -362,10 +365,11 @@ def process_cache(cache, assoc_alts, assoc_segregator, pval, min_alleles,
             written += 1
     return written
 
+
 def process_record(record, variant_cache, pval, min_alleles, assoc_fields,
                    csq_filter, hit_vep_filter, assoc_segregator, freq,
                    freq_fields, any_or_all, allele_filters=[]):
-    remove_alleles = [False] * (len(record.ALLELES) -1)
+    remove_alleles = [False] * (len(record.ALLELES) - 1)
     for i in range(1, len(record.ALLELES)):
         if record.ALLELES[i] == '*':
             remove_alleles[i-1] = True
@@ -412,13 +416,15 @@ def process_record(record, variant_cache, pval, min_alleles, assoc_fields,
         variant_cache.check_record(record)
     return assoc_alts
 
+
 def is_assoc_hit(record, pval, min_alleles, assoc_fields, any_or_all=all):
     '''
         For each ALT allele check if they meet the requirement for an
         enrichment hit
     '''
-    allele_is_hit = [False] * (len(record.ALLELES) -1)
-    info = record.parsed_info_fields(fields=['gassoc_cohort_alt'] + assoc_fields)
+    allele_is_hit = [False] * (len(record.ALLELES) - 1)
+    info = record.parsed_info_fields(
+        fields=['gassoc_cohort_alt'] + assoc_fields)
     for i in range(len(record.ALLELES) - 1):
         if (info['gassoc_cohort_alt'][i] is None or
                 info['gassoc_cohort_alt'][i] < min_alleles):
@@ -428,13 +434,15 @@ def is_assoc_hit(record, pval, min_alleles, assoc_fields, any_or_all=all):
             allele_is_hit[i] = True
     return allele_is_hit
 
+
 def set_true_if_true(a, b):
     for i in range(len(a)):
         if b[i]:
             a[i] = True
 
+
 def filter_on_existing_freq(record, freq, freq_fields):
-    remove  = [False] * (len(record.ALLELES) -1)
+    remove  = [False] * (len(record.ALLELES) - 1)
     parsed = record.parsed_info_fields(fields=freq_fields)
     for annot in parsed:
         if parsed[annot] is None:
@@ -445,15 +453,17 @@ def filter_on_existing_freq(record, freq, freq_fields):
                     remove[i] = True
     return remove
 
+
 def filter_on_existing_cadd(record, score):
-    remove  = [False] * (len(record.ALLELES) -1)
+    remove = [False] * (len(record.ALLELES) - 1)
     phreds = record.parsed_info_fields(fields=['CADD_PHRED_score'])
     if 'CADD_PHRED_score' in phreds:
         for i in range(len(remove)):
             if (phreds['CADD_PHRED_score'][i] is not None and
-                phreds['CADD_PHRED_score'][i] < score):
+                    phreds['CADD_PHRED_score'][i] < score):
                 remove[i] = True
     return remove
+
 
 def get_vase_freq_annots(vcf):
     frqs = list()
@@ -461,11 +471,12 @@ def get_vase_freq_annots(vcf):
         match = re.search('^VASE_dbSNP|gnomAD(_\d+)?_(CAF|AF)(_\w+)?', annot)
         if match:
             if (vcf.metadata['INFO'][annot][-1]['Number'] == 'A' and
-                vcf.metadata['INFO'][annot][-1]['Type'] == 'Float'):
+                    vcf.metadata['INFO'][annot][-1]['Type'] == 'Float'):
                 logger.info("Found previous allele frequency annotation " +
                             "'{}'".format(annot))
                 frqs.append(annot)
     return frqs
+
 
 def get_assoc_fields(vcf):
     for f in ['gassoc_cohort_alt', 'gassoc_cohort_non_alt']:
@@ -483,6 +494,7 @@ def get_assoc_fields(vcf):
         sys.exit("No P-value annotations found in VCF header. Exiting.\n")
     return annots
 
+
 def update_progress(n, w, record, log=False):
     n_prog_string = ("{:,} variants processed, {:,} written ".format(n, w) +
                      "at {}:{}".format(record.CHROM, record.POS))
@@ -492,33 +504,34 @@ def update_progress(n, w, record, log=False):
     else:
         n_prog_string = '\r' + n_prog_string
         if len(prog_string) > len(n_prog_string):
-            sys.stderr.write('\r' + ' ' * len(prog_string) )
+            sys.stderr.write('\r' + ' ' * len(prog_string))
         sys.stderr.write(prog_string)
     prog_string = n_prog_string
 
 
 def write_vcf_header(vcf, fh, assoc_seg):
     vcf.header.add_header_field(name="assoc_hits",
-                               string='"' + str.join(" ", sys.argv) + '"')
+                                string='"' + str.join(" ", sys.argv) + '"')
     inf = dict()
     for f in assoc_seg.header_fields:
-        inf[f[0]] = {'Number' : 'A', 'Type' : 'String',
-                     'Description' : f[1] }
-    for f,d in inf.items():
+        inf[f[0]] = {'Number': 'A', 'Type': 'String',
+                     'Description': f[1]}
+    for f, d in inf.items():
         vcf.header.add_header_field(name=f, dictionary=d, field_type='INFO')
     fh.write(str(vcf.header))
 
+
 def get_options():
     biotype_default = ['3prime_overlapping_ncrna', 'antisense',
-                        'CTCF_binding_site', 'enhancer', 'lincRNA',
-                        'miRNA', 'misc_RNA', 'Mt_rRNA', 'Mt_tRNA',
-                        'open_chromatin_region', 'polymorphic_pseudogene',
-                        'processed_transcript', 'promoter',
-                        'promoter_flanking_region', 'protein_coding', 'rRNA',
-                        'sense_intronic', 'sense_overlapping', 'snoRNA',
-                        'snRNA', 'TF_binding_site',
-                        'translated_processed_pseudogene', 'TR_C_gene',
-                        'TR_D_gene', 'TR_J_gene', 'TR_V_gene']
+                       'CTCF_binding_site', 'enhancer', 'lincRNA',
+                       'miRNA', 'misc_RNA', 'Mt_rRNA', 'Mt_tRNA',
+                       'open_chromatin_region', 'polymorphic_pseudogene',
+                       'processed_transcript', 'promoter',
+                       'promoter_flanking_region', 'protein_coding', 'rRNA',
+                       'sense_intronic', 'sense_overlapping', 'snoRNA',
+                       'snRNA', 'TF_binding_site',
+                       'translated_processed_pseudogene', 'TR_C_gene',
+                       'TR_D_gene', 'TR_J_gene', 'TR_V_gene']
     parser = argparse.ArgumentParser(description='''
             Find genes with an association hit on one allele and an allele
             matching consequence requirements on the other.''')
@@ -530,12 +543,12 @@ def get_options():
     parser.add_argument("-v", "--p_value", type=float, default=1e-4,
                         help='''Minimum association test p-value.
                         Default=1e-4''')
-    parser.add_argument("-a", "--min_alleles", type=int, default=2, help=
-                        '''Minimum observed alleles from association test.
+    parser.add_argument("-a", "--min_alleles", type=int, default=2, 
+                        help='''Minimum observed alleles from association test.
                         Default=2.''')
-    parser.add_argument("--min_families", type=int, default=2, help=
-                        '''Minimum number of families with biallelic hits in a
-                        transcript. Default=2.''')
+    parser.add_argument("--min_families", type=int, default=2,
+                        help='''Minimum number of families with biallelic hits
+                        in a transcript. Default=2.''')
     parser.add_argument("--allow_any_pop", action='store_true',
                         help='''Require the p-value to be under threshold for
                         any population instead of requiring all analyzed
@@ -544,48 +557,47 @@ def get_options():
     parser.add_argument("--pops", nargs='+', help='''One or more gnomAD
                         populations to test against. Default to all
                         annotated p-values from gnomad_assoc.py.''')
-    parser.add_argument('--freq', type=float, default=0.0, help=
-                        '''Allele frequency cutoff. Frequency information will
+    parser.add_argument('--freq', type=float, default=0.0, help='''
+                        Allele frequency cutoff. Frequency information will
                         be read from existing VASE and VEP annotations.
                         Variant alleles with an allele frequency equal to or
                         greater than this value will be filtered.''')
-    parser.add_argument('--max_incidentals', type=int, default=0, help=
-                        '''Maximum number of families with an individual that
+    parser.add_argument('--max_incidentals', type=int, default=0, help='''
+                        Maximum number of families with an individual that
                         carries one allele of a biallelic variant without
                         having a second qualifying variant. Useful for
                         filtering out implausibly common alleles that by chance
                         segregate in a subset of families. Default=0 (i.e. not
                         applied).''')
-    parser.add_argument('--gq', type=int, default=20, help=
-                         '''Minimum genotype quality score threshold. Sample
-                         genotype calls with a score lower than this threshold
-                         will be treated as no-calls. Default = 20.''')
-    parser.add_argument('-dp', '--dp', type=int, default=0, help=
-                        '''Minimum genotype depth threshold. Sample genotype
+    parser.add_argument('--gq', type=int, default=20, help='''
+                        Minimum genotype quality score threshold. Sample
+                        genotype calls with a score lower than this threshold
+                        will be treated as no-calls. Default = 20.''')
+    parser.add_argument('-dp', '--dp', type=int, default=0, help='''
+                        Minimum genotype depth threshold. Sample genotype
                         calls with a read depth lower than this threshold
                         will be treated as no-calls. Default = 0.''')
-    parser.add_argument('-max_dp', '--max_dp', type=int, default=0, help=
-                        '''Maximum genotype depth threshold. Sample genotype
-                        calls with a read depth higher than this threshold
-                        will be treated as no-calls. Default = 0 (i.e. not
-                        used).''')
+    parser.add_argument('-max_dp', '--max_dp', type=int, default=0, help='''
+                        Maximum genotype depth threshold. Sample genotype calls
+                        with a read depth higher than this threshold will be
+                        treated as no-calls. Default = 0 (i.e. not used).''')
     parser.add_argument('-het_ab', '--het_ab', type=float, default=0.,
-                         metavar='AB', help='''Minimum genotype allele balance
-                         for heterozygous genotypes. Heterozygous sample
-                         genotype calls with a ratio of the alternate allele vs
-                         total depth lower than this threshold will be treated
-                         as no-calls. Default = 0.''')
+                        metavar='AB', help='''Minimum genotype allele balance
+                        for heterozygous genotypes. Heterozygous sample
+                        genotype calls with a ratio of the alternate allele vs
+                        total depth lower than this threshold will be treated
+                        as no-calls. Default = 0.''')
     parser.add_argument('-hom_ab', '--hom_ab', type=float,
-                         metavar='AB', help='''Minimum genotype allele balance
-                         for homozygous genotypes. Homozygous sample genotype
-                         calls with a ratio of the alternate allele vs total
-                         depth lower than this threshold will be treated
-                         as no-calls.''')
-    parser.add_argument('--csq', nargs='+', help=
-                        '''One or more VEP consequence classes to retain.
-                        Variants that are not below the P-value cut-off which
-                        do not result in one of these VEP consequence classes
-                        will be filtered. Default=['TFBS_ablation',
+                        metavar='AB', help='''Minimum genotype allele balance
+                        for homozygous genotypes. Homozygous sample genotype
+                        calls with a ratio of the alternate allele vs total
+                        depth lower than this threshold will be treated
+                        as no-calls.''')
+    parser.add_argument('--csq', nargs='+', help='''
+                        One or more VEP consequence classes to retain. Variants
+                        that are not below the P-value cut-off which do not
+                        result in one of these VEP consequence classes will be
+                        filtered. Default=['TFBS_ablation',
                         'TFBS_amplification', 'inframe_deletion',
                         'inframe_insertion', 'frameshift_variant',
                         'initiator_codon_variant', 'missense_variant',
@@ -600,22 +612,22 @@ def get_options():
                         'LOW' and 'MODIFIER'. Any consequence classes specified
                         by the '--csq' argument will still be retained
                         irrespective of values specified here.''')
-    parser.add_argument('--canonical', action='store_true', help=
-                        '''When used in conjunction with --csq argument,
+    parser.add_argument('--canonical', action='store_true', help='''
+                        When used in conjunction with --csq argument,
                         ignore consequences for non-canonical transcripts.''')
-    parser.add_argument('--flagged_features', action='store_true', help=
-                        '''Ignore consequences for flagged transcripts/features
+    parser.add_argument('--flagged_features', action='store_true', help='''
+                        Ignore consequences for flagged transcripts/features
                         (i.e. with a non-empty 'FLAGS' CSQ field).''')
     parser.add_argument('--biotypes',  nargs='+', default=biotype_default,
                         metavar='BIOTYPE', help='''Ignore consequences in
                         biotypes other than those specified here. Default =
                         {}'''.format(biotype_default))
-    parser.add_argument('--feature_blacklist', '--blacklist', help=
-                        '''A file containing a list of Features (e.g. Ensembl
+    parser.add_argument('--feature_blacklist', '--blacklist', help='''
+                        A file containing a list of Features (e.g. Ensembl
                         transcript IDs) to ignore. These must correspond
                         to the IDs in the 'Feature' field annotated by VEP.''')
-    parser.add_argument('--loftee', default=False, action='store_true', help=
-                        '''Retain LoF (stop_gained, frameshift_variant,
+    parser.add_argument('--loftee', default=False, action='store_true',
+                        help='''Retain LoF (stop_gained, frameshift_variant,
                         splice_acceptor_variant and splice_donor_variant)
                         classes only if the LoF annotation from loftee is
                         'HC'.''')
@@ -652,7 +664,7 @@ def get_options():
                         will be filtered if any program does not have a
                         prediction/score.''')
     parser.add_argument('--keep_if_any_damaging', action='store_true',
-                        default=False, help= '''For use in conjunction with
+                        default=False, help='''For use in conjunction with
                         --missense_filters. If this option is provided, a
                         missense consequence is only filtered if ALL of the
                         programs provided to --missense_filters do not have an
@@ -678,7 +690,7 @@ def get_options():
                         default=False, help='''Same as --filter_unpredicted but
                         for --splice_filters only.''')
     parser.add_argument('--splice_keep_if_any_damaging', action='store_true',
-                        default=False, help= '''Same as --keep_if_any_damaging
+                        default=False, help='''Same as --keep_if_any_damaging
                         but for --splice_filters only.''')
     parser.add_argument('--retain_labels', metavar='Label=Value', nargs='+',
                         help='''Retain consequence annotations if there is a
@@ -690,8 +702,8 @@ def get_options():
                         help='''Use this option if you want to ignore VEP
                         annotated allele frequencies when using the --freq
                         option.''')
-    parser.add_argument('--vep_af', '-vep_af', nargs='+', default=[], help=
-                        '''One or more VEP allele frequency annotations to
+    parser.add_argument('--vep_af', '-vep_af', nargs='+', default=[], help='''
+                        One or more VEP allele frequency annotations to
                         use for frequency filtering. Default is to use all
                         standard VEP AF annotations.''')
     parser.add_argument('--pathogenic', action='store_true', help='''When used
@@ -716,10 +728,11 @@ def get_options():
     parser.add_argument('--log_progress', action='store_true',
                         help='''Use logging output for progress rather than
                         wiping progress line after each update.''')
-    parser.add_argument('--progress_interval', type=int, default=1000, metavar='N',
-                        help='''Report progress information every N variants.
-                        Default=1000.''')
+    parser.add_argument('--progress_interval', type=int, default=1000,
+                        metavar='N', help='''Report progress information every
+                        N variants. Default=1000.''')
     return parser
+
 
 if __name__ == '__main__':
     argparser = get_options()
