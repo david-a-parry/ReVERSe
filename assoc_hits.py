@@ -42,31 +42,9 @@ class AssocSegregator(RecessiveFilter):
 
     '''
 
-    def __init__(self, family_filter, gq=0, dp=0, max_dp=0, het_ab=0.,
-                 hom_ab=0., min_control_dp=None, max_control_dp=None,
-                 min_control_gq=None, control_het_ab=None, control_hom_ab=None,
-                 con_ref_ab=None, sv_gq=0, sv_dp=0, sv_max_dp=0,
-                 sv_het_ab=0., sv_hom_ab=0., sv_min_control_dp=None,
-                 sv_max_control_dp=0, sv_min_control_gq=None,
-                 sv_control_het_ab=None, sv_control_hom_ab=None,
-                 sv_con_ref_ab=None, min_families=1, strict=False,
+    def __init__(self, family_filter, gt_args, min_families=1, strict=False,
                  exclude_denovo=False, report_file=None, max_incidentals=0):
-        super().__init__(family_filter, gq=gq, dp=dp, max_dp=max_dp,
-                         het_ab=het_ab, hom_ab=hom_ab,
-                         min_control_dp=min_control_dp,
-                         max_control_dp=max_control_dp,
-                         min_control_gq=min_control_gq,
-                         control_het_ab=control_het_ab,
-                         control_hom_ab=control_hom_ab, con_ref_ab=con_ref_ab,
-                         sv_gq=sv_gq, sv_dp=sv_dp, sv_max_dp=sv_max_dp,
-                         sv_het_ab=sv_het_ab, sv_hom_ab=sv_hom_ab,
-                         sv_min_control_dp=sv_min_control_dp,
-                         sv_max_control_dp=sv_max_control_dp,
-                         sv_min_control_gq=sv_min_control_gq,
-                         sv_control_het_ab=sv_control_het_ab,
-                         sv_control_hom_ab=sv_control_hom_ab,
-                         sv_con_ref_ab=sv_con_ref_ab,
-                         min_families=min_families,
+        super().__init__(family_filter, gt_args, min_families=min_families,
                          report_file=report_file,)
         self.prefix = "gassoc_biallelic"
         self.header_fields = [("gassoc_biallelic_homozygous",
@@ -118,7 +96,7 @@ class AssocSegregator(RecessiveFilter):
         comp_hets = defaultdict(dict) # store compound hets per feature per
                                       # family for checking max_incidentals
         for feat, prs in self._potential_recessives.items():
-            if not final and feat in self._last_added:
+            if not final and feat in self._current_features:
                 continue
             feat_segregating = [] #list of tuples of values for creating SegregatingBiallelic
             un_hets = defaultdict(list)  #store het alleles carried by each unaffected
@@ -210,8 +188,9 @@ class AssocSegregator(RecessiveFilter):
             else:
                 var_to_segregants[sb.segregant.var_id] = [sb.segregant]
         #clear the cache except for the last entry which will be a new gene
-        self._potential_recessives = self._last_added
-        self._last_added = dict()
+        self._potential_recessives = OrderedDict(
+            (k, v) for k, v in self._potential_recessives.items() if k in
+            self._current_features)
         return var_to_segregants
 
     def _filter_incidentals(self, feat_segregating, comp_hets):
@@ -289,12 +268,14 @@ def main(args):
     pedfile = PedFile(args.ped)
     family_filter = FamilyFilter(ped=pedfile, vcf=vcfreader,
                                  logging_level=logger.level)
+    gt_args = dict(gq=args.gq,
+                   dp=args.dp,
+                   max_dp=args.max_dp,
+                   hom_ab=args.hom_ab,
+                   het_ab=args.het_ab)
     assoc_segregator = AssocSegregator(family_filter,
-                                       gq=args.gq,
-                                       dp=args.dp,
-                                       max_dp=args.max_dp,
+                                       gt_args,
                                        min_families=args.min_families,
-                                       het_ab=args.het_ab,
                                        max_incidentals=args.max_incidentals)
     #VepFilter for non-association hits (i.e. functional second hits)
     csq_filter = VepFilter(vcf=vcfreader,
@@ -594,6 +575,12 @@ def get_options():
                          genotype calls with a ratio of the alternate allele vs
                          total depth lower than this threshold will be treated
                          as no-calls. Default = 0.''')
+    parser.add_argument('-hom_ab', '--hom_ab', type=float,
+                         metavar='AB', help='''Minimum genotype allele balance
+                         for homozygous genotypes. Homozygous sample genotype
+                         calls with a ratio of the alternate allele vs total
+                         depth lower than this threshold will be treated
+                         as no-calls.''')
     parser.add_argument('--csq', nargs='+', help=
                         '''One or more VEP consequence classes to retain.
                         Variants that are not below the P-value cut-off which
