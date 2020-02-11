@@ -2,9 +2,7 @@
 import sys
 import argparse
 import re
-import os
 import logging
-import gzip
 from collections import defaultdict, OrderedDict
 from parse_vcf import VcfReader
 from vase.ped_file import PedFile
@@ -23,6 +21,7 @@ formatter = logging.Formatter(
 ch.setFormatter(formatter)
 logger.addHandler(ch)
 prog_string = ''
+
 
 class AssocSegregator(RecessiveFilter):
     '''
