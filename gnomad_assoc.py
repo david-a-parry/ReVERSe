@@ -7,7 +7,7 @@ import logging
 import bisect
 import gzip
 import pysam
-import scipy.stats as stats
+from scipy.stats import fisher_exact
 from collections import defaultdict
 from parse_vcf import VcfReader
 from vase.var_by_region import VarByRegion
@@ -526,7 +526,7 @@ def process_variant(record, gnomad_filters, p_value, pops, gts, gt_filter,
         for p in pop_ids:
             if p in g_cohort_to_counts:
                 ac, an = g_cohort_to_counts[p][i]
-                odds, pval = stats.fisher_exact([(alts, refs), (ac, an-ac)],
+                odds, pval = fisher_exact([(alts, refs), (ac, an-ac)],
                                                 alternative='greater')
                 all_pvals.append(pval)
                 results.extend([ac, an - ac, pval, odds])
@@ -534,7 +534,7 @@ def process_variant(record, gnomad_filters, p_value, pops, gts, gt_filter,
                 total_an += an
             else:
                 results.extend(['.'] * 4)
-        odds, pval = stats.fisher_exact([(alts, refs), (total_ac,
+        odds, pval = fisher_exact([(alts, refs), (total_ac,
                                                         total_an-total_ac)],
                                         alternative='greater')
         results.extend([total_ac, total_an - total_ac, pval, odds])
