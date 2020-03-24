@@ -61,7 +61,7 @@ class AssocSegregator(RecessiveFilter):
             ("gassoc_biallelic_features",
              '"Features (e.g. transcripts) that contain qualifying ' +
              'biallelic variants parsed by {}"' .format(
-                 type(self).__name__)), ]
+                 type(self).__name__))]
         self.annot_fields = ('homozygous', 'compound_het', 'de_novo',
                              'families', 'features')
         self.max_incidentals = max_incidentals
@@ -92,9 +92,12 @@ class AssocSegregator(RecessiveFilter):
                         been encountered.
 
         '''
-        segregating = OrderedDict()  # keys are alt_ids, values are SegregatingBiallelic
-        comp_hets = defaultdict(dict)  # compound hets per feature per
-                                       # family for checking max_incidentals
+        segregating = OrderedDict()
+        # keys are alt_ids, values are SegregatingBiallelic
+        comp_hets = defaultdict(dict)
+        # compound hets per feature per family for checking max_incidentals
+        bi_and_carrier_fams = dict()
+        # keys are feats, values are dicts indicating biallelic/carrier fams
         for feat, prs in self._potential_recessives.items():
             if not final and feat in self._current_features:
                 continue
@@ -102,15 +105,21 @@ class AssocSegregator(RecessiveFilter):
             un_hets = defaultdict(list)  # het alleles carried by unaffected
             aff_hets = defaultdict(list)  # het alleles carried by affected
             biallelics = defaultdict(list)  # biallelic combinations for affs
+            phase_known_biallelics = set()
+            phase_unknown_biallelics = set()
+            carrier_fams = set()
             for pid, p in prs.items():
                 for un in self.unaffected:
-                    if p.allele_counts[un] == 1:  # checked for homs when adding
-                        # store allele carried in this unaffected
+                    if p.allele_counts[un] == 1:
+                        # checked for homs when adding store allele carried in
+                        # this unaffected
                         un_hets[un].append(pid)
+                        carrier_fams.add(self.ped.fid_from_iid(un))
                 for aff in (x for x in self.affected
                             if self.ped.fid_from_iid(x) in p.families):
                     if p.allele_counts[aff] == 1:
                         aff_hets[aff].append(pid)
+                        carrier_fams.add(self.ped.fid_from_iid(aff))
                     elif p.allele_counts[aff] == 2:
                         if pid in assoc_alleles:
                             biallelics[aff].append(tuple([pid]))
@@ -159,8 +168,19 @@ class AssocSegregator(RecessiveFilter):
                                 continue
                             if len(bi) == 1:
                                 model = 'homozygous'
+                                phase_known_biallelics.add(fid)
                             else:
                                 model = 'compound_het'
+                                if any(self.ped.individuals[x].parents for x in
+                                       affs if x in self.samples):
+                                    if all(any([y in x for x in
+                                                de_novo.values()]) for y in
+                                           affs):  # phase of de novos unknown
+                                        phase_unknown_biallelics.add(fid)
+                                    else:
+                                        phase_known_biallelics.add(fid)
+                                else:  # no parents, phase unknown
+                                    phase_unknown_biallelics.add(fid)
                                 if fid not in comp_hets[feat]:
                                     comp_hets[feat][fid] = list()
                                 comp_hets[feat][fid].append(bi)
@@ -172,17 +192,23 @@ class AssocSegregator(RecessiveFilter):
             if self.max_incidentals:
                 feat_segregating = self._filter_incidentals(feat_segregating,
                                                             comp_hets)
-            fam_count = len(set([fam for tup in feat_segregating for fam in
-                                 tup[2]]))
+            seg_fams = set([fam for tup in feat_segregating for fam in
+                            tup[2]])
+            fam_count = len(seg_fams)
             if fam_count >= self.min_families:
                 for tp in feat_segregating:
                     if tp[0] in segregating:
                         segregating[tp[0]].add_samples(*tp[1:6])
                     else:
                         segregating[tp[0]] = SegregatingVariant(*tp)
+            carrier_fams = carrier_fams.difference(seg_fams)
+            bi_and_carrier_fams[feat] = {'phased': phase_known_biallelics,
+                                         'unphased': phase_unknown_biallelics,
+                                         'carrier': carrier_fams}
         var_to_segregants = OrderedDict()
         for sb in segregating.values():
             sb.annotate_record(self.report_file, self.annot_fields)
+            self._annotate_phase_and_carrier_info(sb, bi_and_carrier_fams)
             if sb.segregant.var_id in var_to_segregants:
                 var_to_segregants[sb.segregant.var_id].append(sb.segregant)
             else:
@@ -239,6 +265,14 @@ class AssocSegregator(RecessiveFilter):
             for k in sorted(c_het_indices):
                 still_segregating.append(het_list[k])
         return still_segregating
+
+    def _annotate_phase_and_carrier_info(self, sb, bi_fams):
+        info = defaultdict(list)
+        for feat in sorted(sb.features):
+            for k, v in bi_fams[feat].items():
+                f = 'gassoc_' + k + '_families'
+                info[f].append('|'.join(v) or '.')
+        sb.segregant.record.add_info_fields(info)
 
 
 def main(args):
@@ -441,7 +475,7 @@ def set_true_if_true(a, b):
 
 
 def filter_on_existing_freq(record, freq, freq_fields):
-    remove  = [False] * (len(record.ALLELES) - 1)
+    remove = [False] * (len(record.ALLELES) - 1)
     parsed = record.parsed_info_fields(fields=freq_fields)
     for annot in parsed:
         if parsed[annot] is None:
@@ -513,8 +547,26 @@ def write_vcf_header(vcf, fh, assoc_seg):
                                 string='"' + str.join(" ", sys.argv) + '"')
     inf = dict()
     for f in assoc_seg.header_fields:
-        inf[f[0]] = {'Number': 'A', 'Type': 'String',
-                     'Description': f[1]}
+        inf[f[0]] = {'Number': 'A', 'Type': 'String', 'Description': f[1]}
+    h_flds = [("gassoc_phased_families",
+               '"Family IDs for gassoc_biallelic features where phase of ' +
+               'biallelics is known. Each family ID is separated by a pipe ' +
+               'character, annotations per feature are separated by commas ' +
+               'in the same order as given by gassoc_biallelic_features."'),
+              ("gassoc_unphased_families",
+               '"Family IDs for gassoc_biallelic alleles where phase of ' +
+               'biallelics is unknown. Each family ID is separated by a ' +
+               'pipe character, annotations per feature are separated by ' +
+               'commas in the same order as given by ' +
+               'gassoc_biallelic_features."'),
+              ("gassoc_carrier_families",
+               '"Family IDs for gassoc_biallelic features where families ' +
+               'have at least one carrier for a qualifying variant. Each ' +
+               'family ID is separated by a pipe character, annotations per ' +
+               'feature are separated by commas in the same order as given ' +
+               'by gassoc_biallelic_features."')]
+    for f in h_flds:
+        inf[f[0]] = {'Number': '.', 'Type': 'String', 'Description': f[1]}
     for f, d in inf.items():
         vcf.header.add_header_field(name=f, dictionary=d, field_type='INFO')
     fh.write(str(vcf.header))
@@ -542,7 +594,7 @@ def get_options():
     parser.add_argument("-v", "--p_value", type=float, default=1e-4,
                         help='''Minimum association test p-value.
                         Default=1e-4''')
-    parser.add_argument("-a", "--min_alleles", type=int, default=2, 
+    parser.add_argument("-a", "--min_alleles", type=int, default=2,
                         help='''Minimum observed alleles from association test.
                         Default=2.''')
     parser.add_argument("--min_families", type=int, default=2,
