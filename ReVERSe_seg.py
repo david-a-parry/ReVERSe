@@ -12,7 +12,7 @@ from vase.family_filter import SegregatingVariant
 from vase.vase_runner import VariantCache
 from Bio import bgzf
 
-logger = logging.getLogger("gnomAD Assoc")
+logger = logging.getLogger("ReVERSe")
 logger.setLevel(logging.INFO)
 ch = logging.StreamHandler()
 ch.setLevel(logging.INFO)
@@ -45,20 +45,20 @@ class AssocSegregator(RecessiveFilter):
                  exclude_denovo=False, report_file=None, max_incidentals=0):
         super().__init__(family_filter, gt_args, min_families=min_families,
                          report_file=report_file,)
-        self.prefix = "gassoc_biallelic"
+        self.prefix = "ReVERSe_biallelic"
         self.header_fields = [
-            ("gassoc_biallelic_homozygous",
+            ("ReVERSe_biallelic_homozygous",
              '"Samples that carry homozygous biallelic changes ' +
              ' parsed by {}"' .format(type(self).__name__)),
-            ("gassoc_biallelic_compound_het",
+            ("ReVERSe_biallelic_compound_het",
              '"Samples that carry compound heterozygous biallelic changes ' +
              'parsed by {}"'.format(type(self).__name__)),
-            ("gassoc_biallelic_de_novo",
+            ("ReVERSe_biallelic_de_novo",
              '"Samples that carry biallelic alleles that appear to have ' +
              'arisen de novo"'),
-            ('gassoc_biallelic_families',
-             '"Family IDs for gassoc_biallelic alleles"'),
-            ("gassoc_biallelic_features",
+            ('ReVERSe_biallelic_families',
+             '"Family IDs for ReVERSe_biallelic alleles"'),
+            ("ReVERSe_biallelic_features",
              '"Features (e.g. transcripts) that contain qualifying ' +
              'biallelic variants parsed by {}"' .format(
                  type(self).__name__))]
@@ -270,7 +270,7 @@ class AssocSegregator(RecessiveFilter):
         info = defaultdict(list)
         for feat in sorted(sb.features):
             for k, v in bi_fams[feat].items():
-                f = 'gassoc_' + k + '_families'
+                f = 'ReVERSe_' + k + '_families'
                 info[f].append('|'.join(v) or '.')
         sb.segregant.record.add_info_fields(info)
 
@@ -280,7 +280,7 @@ def main(args):
     vcfreader = VcfReader(args.vcf_input)
     avail_assoc_fields = get_assoc_fields(vcfreader)
     if args.pops:
-        assoc_fields = ['gassoc_{}_P'.format(x) for x in args.pops]
+        assoc_fields = ['ReVERSe_{}_P'.format(x) for x in args.pops]
         if not set(avail_assoc_fields).issuperset(set(assoc_fields)):
             sys.exit("ERROR: The following P-value annotations populations " +
                      "were not found in your VCF: " + ", ".join(
@@ -457,10 +457,10 @@ def is_assoc_hit(record, pval, min_alleles, assoc_fields, any_or_all=all):
     '''
     allele_is_hit = [False] * (len(record.ALLELES) - 1)
     info = record.parsed_info_fields(
-        fields=['gassoc_cohort_alt'] + assoc_fields)
+        fields=['ReVERSe_cohort_alt'] + assoc_fields)
     for i in range(len(record.ALLELES) - 1):
-        if (info['gassoc_cohort_alt'][i] is None or
-                info['gassoc_cohort_alt'][i] < min_alleles):
+        if (info['ReVERSe_cohort_alt'][i] is None or
+                info['ReVERSe_cohort_alt'][i] < min_alleles):
             continue
         if any_or_all(info[f][i] is not None and info[f][i] <= pval for f in
                       assoc_fields):
@@ -512,14 +512,14 @@ def get_vase_freq_annots(vcf):
 
 
 def get_assoc_fields(vcf):
-    for f in ['gassoc_cohort_alt', 'gassoc_cohort_non_alt']:
+    for f in ['ReVERSe_cohort_alt', 'ReVERSe_cohort_non_alt']:
         if f not in vcf.metadata['INFO']:
             sys.exit("Missing required annotation field '{}' in ".format(f) +
-                     "VCF header. The gnomad_assoc.py script must be used to" +
+                     "VCF header. The ReVERSe_count.py script must be used to" +
                      " produce your input VCF before running this program.\n")
     annots = list()
     for info in vcf.metadata['INFO']:
-        match = re.search('^gassoc_\w+_P', info)
+        match = re.search('^ReVERSe_\w+_P', info)
         if match:
             annots.append(info)
             logger.debug("Identified association INFO field '{}'".format(info))
@@ -543,28 +543,28 @@ def update_progress(n, w, record, log=False):
 
 
 def write_vcf_header(vcf, fh, assoc_seg):
-    vcf.header.add_header_field(name="assoc_hits",
+    vcf.header.add_header_field(name="ReVERSe_seg",
                                 string='"' + str.join(" ", sys.argv) + '"')
     inf = dict()
     for f in assoc_seg.header_fields:
         inf[f[0]] = {'Number': 'A', 'Type': 'String', 'Description': f[1]}
-    h_flds = [("gassoc_phased_families",
-               '"Family IDs for gassoc_biallelic features where phase of ' +
+    h_flds = [("ReVERSe_phased_families",
+               '"Family IDs for ReVERSe_biallelic features where phase of ' +
                'biallelics is known. Each family ID is separated by a pipe ' +
                'character, annotations per feature are separated by commas ' +
-               'in the same order as given by gassoc_biallelic_features."'),
-              ("gassoc_unphased_families",
-               '"Family IDs for gassoc_biallelic alleles where phase of ' +
+               'in the same order as given by ReVERSe_biallelic_features."'),
+              ("ReVERSe_unphased_families",
+               '"Family IDs for ReVERSe_biallelic alleles where phase of ' +
                'biallelics is unknown. Each family ID is separated by a ' +
                'pipe character, annotations per feature are separated by ' +
                'commas in the same order as given by ' +
-               'gassoc_biallelic_features."'),
-              ("gassoc_carrier_families",
-               '"Family IDs for gassoc_biallelic features where families ' +
+               'ReVERSe_biallelic_features."'),
+              ("ReVERSe_carrier_families",
+               '"Family IDs for ReVERSe_biallelic features where families ' +
                'have at least one carrier for a qualifying variant. Each ' +
                'family ID is separated by a pipe character, annotations per ' +
                'feature are separated by commas in the same order as given ' +
-               'by gassoc_biallelic_features."')]
+               'by ReVERSe_biallelic_features."')]
     for f in h_flds:
         inf[f[0]] = {'Number': '.', 'Type': 'String', 'Description': f[1]}
     for f, d in inf.items():
@@ -607,7 +607,7 @@ def get_options():
                         threshold.''')
     parser.add_argument("--pops", nargs='+', help='''One or more gnomAD
                         populations to test against. Default to all
-                        annotated p-values from gnomad_assoc.py.''')
+                        annotated p-values from ReVERSe_count.py.''')
     parser.add_argument('--freq', type=float, default=0.0, help='''
                         Allele frequency cutoff. Frequency information will
                         be read from existing VASE and VEP annotations.
