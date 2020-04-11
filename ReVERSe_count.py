@@ -340,6 +340,13 @@ def _one_individual_per_fam(gts, gt_filter, allele, families):
                 # no-call. If homs and hets present add the first het
                 i = a_counts.index(min((x for x in a_counts if x > 0)))
                 indvs.append(members[i])
+            else:
+                # at least one hom-ref call or all are no-calls, pick first
+                # with hom-ref call (if any) or else arbitrarily pick first
+                if any(x == 0 for x in a_counts):
+                    indvs.append(members[a_counts.index(0)])
+                else:
+                    indvs.append(members[0])
     return indvs
 
 
