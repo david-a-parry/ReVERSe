@@ -18,6 +18,7 @@ class ReverseReporter(VaseReporter):
             ogee_csv = os.path.join(os.path.dirname(__file__),
                                     "data",
                                     "ogeev2_frac_ess.csv")
+        self.ogee_df = pd.read_csv(ogee_csv)
         super.__init__(self, vcf, out=tmpf, output_type='json', **kwargs)
 
     def _get_seg_fields(self):
@@ -109,8 +110,8 @@ class ReverseReporter(VaseReporter):
         df['N_Families'] = df.SYMBOL.apply(
             lambda x: len(df[df.SYMBOL == x].Family.unique()))
         df['Frac_E'] = df.SYMBOL.apply(
-            lambda x: ogee_df[ogee_df.symbols == x]['Frac_E'].values[0]
-            if x in ogee_df.symbols.values else 0)
+            lambda x: self.ogee_df[self.ogee_df.symbols == x]['Frac_E'].values[0]
+            if x in self.ogee_df.symbols.values else 0)
         df['Rank'] = ((1 + df.Carrier_Families) *
                       (1.1 - df.Frac_E) *
                       (1 + df.N_second_hit))
