@@ -1,6 +1,6 @@
 # ReVERSe
 
-## __R__ar__e__ __V__ariant __E__nrichment and __R__ecessive __Se__gregation
+**R**ar**e** **V**ariant **E**nrichment and **R**ecessive **Se**gregation
 
 ### Installation
     
