@@ -11,7 +11,7 @@ from vase.gnomad_filter import GnomadFilter
 from vase.sample_filter import GtFilter
 from vase.ped_file import PedFile
 from Bio import bgzf
-from ReVERSe import CovAnalyzer
+from ReVERSe.cov_analyzer import CovAnalyzer
 
 logger = logging.getLogger("ReVERSe")
 logger.setLevel(logging.INFO)
