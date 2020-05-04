@@ -1,3 +1,4 @@
+import os
 from collections import defaultdict
 from tempfile import NamedTemporaryFile
 import pandas as pd
@@ -9,10 +10,14 @@ feat_annots = {'ReVERSe_biallelic_families': 'ReVERSe_biallelic_features'}
 class ReverseReporter(VaseReporter):
     ''' Read a ReVERSe_seg annotated VCF and output summary data.'''
 
-    def __init__(self, vcf, out, **kwargs):
+    def __init__(self, vcf, out, ogee_csv=None, **kwargs):
         tmpf = NamedTemporaryFile(delete=False)
         tmpf.close()
-        self.reverse_out = out
+        self.csv_out = out
+        if not ogee_csv:
+            ogee_csv = os.path.join(os.path.dirname(__file__),
+                                    "data",
+                                    "ogeev2_frac_ess.csv")
         super.__init__(self, vcf, out=tmpf, output_type='json', **kwargs)
 
     def _get_seg_fields(self):
@@ -115,5 +120,5 @@ class ReverseReporter(VaseReporter):
     def _finish_up(self):
         df = self.convert_seg_data(self)
         df = self.post_process_df(df)
+        df.to_csv(self.csv_out, index=False)
         self.out_fh.close()
-
