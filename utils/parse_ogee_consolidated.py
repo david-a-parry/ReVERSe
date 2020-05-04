@@ -16,9 +16,10 @@ Download consolidated results table from here:
 Use the downloaded file as input to this script.
         '''
     )
-    parser.add_argument('csv', help='''Input csv file. This should be the
-    consolidated results for your species of interest. For humans, download
-    from this page: http://ogee.medgenius.info/browse/Homo%20sapiens''')
+    parser.add_argument('csv',
+                        help='''Input csv file. This should be the
+                        consolidated results for your species of interest
+                        from OGEEv2.''')
     parser.add_argument('-o', '--output', default=sys.stdout,
                         help='''Output file name. If not specified output will
                         be written to STDOUT''')
