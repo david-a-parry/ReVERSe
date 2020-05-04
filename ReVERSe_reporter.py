@@ -1,34 +1,6 @@
 #!/usr/bin/env python3
-import sys
 import argparse
-from vase.vase_reporter import VaseReporter
-
-
-feat_annots = {'ReVERSe_biallelic_families': 'ReVERSe_biallelic_features'}
-
-
-class ReverseReporter(VaseReporter):
-    ''' Read a ReVERSe_seg annotated VCF and output summary data.'''
-
-    def __init__(self, vcf, out, **kwargs):
-        super.__init__(self, vcf, out, output_type='json', **kwargs)
-
-    def _get_seg_fields(self):
-        inheritance_fields = dict()
-        if 'ReVERSe_biallelic_families' in self.vcf.metadata['INFO']:
-            inheritance_fields['ReVERSe_biallelic_families'] = 'recessive'
-            self.logger.info("Found ReVERSe biallelic annotations.")
-        else:
-            raise RuntimeError("no ReVERSe recessive biallelic annotations " +
-                               "found in vcf. Please run ReVERSe_seg first.")
-        return inheritance_fields
-
-    def convert_seg_data(self):
-        pass
-
-    def _finish_up(self):
-        df = self.convert_seg_data(self)
-        self.out_fh.close()
+from ReVERSe import ReverseReporter
 
 
 def parse_args():
@@ -37,7 +9,7 @@ def parse_args():
                                   annotated VCF.''')
     parser.add_argument("vcf", help='''ReVERSe annotated VCF file.''')
     parser.add_argument("out", help='''Name for output XLSX/JSON file.''')
-    parser.add_argument("-p", "--ped", help='''PED file (same as used with ReVERSe
+    parser.add_argument("ped", help='''PED file (same as used with ReVERSe
                         segregation analysis).''')
     parser.add_argument("-f", "--families", nargs='+',
                         help='''One or more families to report variants
@@ -111,11 +83,6 @@ def parse_args():
 if __name__ == '__main__':
     parser = parse_args()
     args = parser.parse_args()
-    if not args.ped and not args.singletons:
-        parser.print_usage()
-        sys.stderr.write("vase_reporter: error: One of --ped or --singletons " +
-                         "arguments is required.\n")
-        sys.exit(2)
     runner = ReverseReporter(**vars(args))
     try:
         runner.write_report()
