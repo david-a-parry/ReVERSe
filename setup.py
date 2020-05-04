@@ -12,10 +12,7 @@ setup(
     author_email = "david.parry@igmm.ed.ac.uk",
     url = "https://git.ecdf.ed.ac.uk/dparry/reverse",
     license='MIT',
-    install_requires=[
-          #'pysam',
-          #'parse_vcf>=0.2.6',
-    ],
+    install_requires=['vase>=0.2.4'],
     extras_require={
         'BGZIP': ['biopython'],
         'REPORTER': ['xlsxwriter', 'requests'],
@@ -33,6 +30,5 @@ setup(
         "License :: OSI Approved :: MIT License",
         "Topic :: Scientific/Engineering :: Bio-Informatics",
         ],
-    dependency_links=[
-        'https://github.com/david-a-parry/vase/tarball/master#egg=0.2.4'],
+    dependency_links=['https://github.com/david-a-parry/vase/tarball/master#egg=vase-0.2.4',],
 )
