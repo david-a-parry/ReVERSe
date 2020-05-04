@@ -34,7 +34,7 @@ def parse_table(csv, output=sys.stdout):
     ogee_df['E'] = ogee_df['essentiality status'].apply(
         lambda x: 1 + x.count(",") - x.count("NE"))
     ogee_df['Frac_E'] = ogee_df['E']/(ogee_df['E'] + ogee_df['NE'])
-    ogee_df.sort_values(by='Frac_E', ascending=False)
+    ogee_df = ogee_df.sort_values(by='Frac_E', ascending=False)
     ogee_df[out_cols].to_csv(output, index=False)
 
 
