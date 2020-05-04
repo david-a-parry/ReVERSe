@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import argparse
-from ReVERSe import ReverseReporter
+from ReVERSe.reporter import ReverseReporter
 
 
 def parse_args():
