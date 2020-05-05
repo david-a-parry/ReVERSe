@@ -3,23 +3,45 @@ from collections import defaultdict
 from tempfile import NamedTemporaryFile
 import pandas as pd
 from vase.vase_reporter import VaseReporter
+from parse_vcf import VcfReader
 
-feat_annots = {'ReVERSe_biallelic_families': 'ReVERSe_biallelic_features'}
-
+supported_formats = ['xlsx', 'csv', 'tsv']
 
 class ReverseReporter(VaseReporter):
     ''' Read a ReVERSe_seg annotated VCF and output summary data.'''
 
-    def __init__(self, vcf, out, ogee_csv=None, **kwargs):
+    def __init__(self, vcf, out, output_format='csv', ogee_csv=None,
+                 info_fields=[], **kwargs):
         tmpf = NamedTemporaryFile(delete=False)
         tmpf.close()
-        self.csv_out = out
+        self.table_out = out
+        self.table_format = output_format
+        if self.table_format not in supported_formats:
+            raise ValueError("--output_type  must be one of the following: " +
+                             ",".join(supported_formats))
+        if not self.table_out.endswith('.' + self.table_format):
+            self.table_out += '.' + self.table_format
         if not ogee_csv:
             ogee_csv = os.path.join(os.path.dirname(__file__),
                                     "data",
                                     "ogeev2_frac_ess.csv")
         self.ogee_df = pd.read_csv(ogee_csv)
-        super.__init__(self, vcf, out=tmpf, output_type='json', **kwargs)
+        feat_annots = {
+            'ReVERSe_biallelic_families': 'ReVERSe_biallelic_features'}
+        vcfreader = VcfReader(vcf)
+        info_fields.extend(self._get_count_fields(vcfreader))
+        super().__init__(vcfreader, out=tmpf.name, output_type='json',
+                         info_fields=info_fields,
+                         custom_feat_annots=feat_annots, **kwargs)
+
+    def _get_count_fields(self, vcf):
+        f = [x for x in vcf.metadata['INFO'] if 'ReVERSe' in x and 'biallelic'
+             not in x]
+        if not f:
+            raise ValueError("No recognised ReVERSe count fields identified " +
+                             "in input VCF ({}). ".format(vcf.filename) +
+                             "Was ReVERSe_count run for this VCF?")
+        return f
 
     def _get_seg_fields(self):
         inheritance_fields = dict()
@@ -42,7 +64,7 @@ class ReverseReporter(VaseReporter):
                 affected.append(aff)
                 if self.ped.individuals[aff].father:
                     father.append(self.ped.individuals[aff].father)
-                if self.self.ped.individuals[aff].mother:
+                if self.ped.individuals[aff].mother:
                     mother.append(self.ped.individuals[aff].mother)
             for var in self.json_dict[fam]:
                 df['Family'].append(fam)
@@ -110,7 +132,8 @@ class ReverseReporter(VaseReporter):
         df['N_Families'] = df.SYMBOL.apply(
             lambda x: len(df[df.SYMBOL == x].Family.unique()))
         df['Frac_E'] = df.SYMBOL.apply(
-            lambda x: self.ogee_df[self.ogee_df.symbols == x]['Frac_E'].values[0]
+            lambda x:
+                self.ogee_df[self.ogee_df.symbols == x]['Frac_E'].values[0]
             if x in self.ogee_df.symbols.values else 0)
         df['Rank'] = ((1 + df.Carrier_Families) *
                       (1.1 - df.Frac_E) *
@@ -119,7 +142,12 @@ class ReverseReporter(VaseReporter):
         return df
 
     def _finish_up(self):
-        df = self.convert_seg_data(self)
+        df = self.convert_seg_data()
         df = self.post_process_df(df)
-        df.to_csv(self.csv_out, index=False)
+        if self.table_format == 'csv':
+            df.to_csv(self.table_out, index=False)
+        elif self.table_format == 'tsv':
+            df.to_csv(self.table_out, index=False, sep='\t')
+        elif self.table_format == 'xlsx':
+            df.to_excel(self.table_out, index=False)
         self.out_fh.close()
