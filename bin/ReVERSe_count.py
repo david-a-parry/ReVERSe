@@ -172,6 +172,8 @@ def _one_individual_per_fam(gts, gt_filter, allele, families):
     for f, members in families.items():
         if len(members) == 1:
             indvs.append(members[0])
+        elif not members:
+            continue
         else:
             a_counts = [gts['GT'][s].count(allele) if
                         gt_filter.gt_is_ok(gts, s, allele) else -1 for s in
