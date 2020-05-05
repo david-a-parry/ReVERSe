@@ -20,6 +20,7 @@ Remember to add the --user flag to pip commands if you get permissions errors.
 
     # Get counts from gnomAD data - make sure you are using the same genome 
     # build as the gnomAD VCF!
+
     ReVERSe_count -i cohort.vcf.gz \
         -ped cohort.ped \
         -e gnomad.exomes.r2.1.sites.vcf.gz \
@@ -34,6 +35,7 @@ Remember to add the --user flag to pip commands if you get permissions errors.
     # enriched alleles or enriched alleles in trans with VEP HIGH impact
     # variants, looking at variants with a maximum frequency of 0.5 %. Alleles
     # with a Fisher's exact test P-value <= 1e-5 are considered enriched.
+    
     ReVERSe_seg -i cohort_rev_counts.vcf.gz \
         --ped cohort.ped \
         --freq 0.005 \
@@ -44,6 +46,7 @@ Remember to add the --user flag to pip commands if you get permissions errors.
         -o cohort_rev_seg.vcf.gz
 
     # Output ranked variants in CSV format
+    
     ReVERSe_reporter cohort_rev_seg.vcf.gz \
         cohort_rev_seg.report.csv \
         cohort.ped
