@@ -8,9 +8,12 @@ def parse_args():
                    description='''Write per family reports from a ReVERSe_seg
                                   annotated VCF.''')
     parser.add_argument("vcf", help='''ReVERSe annotated VCF file.''')
-    parser.add_argument("out", help='''Name for output XLSX/JSON file.''')
+    parser.add_argument("out", help='''Name for output XLSX/CSV file.''')
     parser.add_argument("ped", help='''PED file (same as used with ReVERSe
                         segregation analysis).''')
+    parser.add_argument("--output_format", default='csv',
+                        help='''Output format. Default=csv. Valid options are
+                        csv, tsv, or xlsx.''')
     parser.add_argument("-f", "--families", nargs='+',
                         help='''One or more families to report variants
                         for.''')
@@ -84,7 +87,4 @@ if __name__ == '__main__':
     parser = parse_args()
     args = parser.parse_args()
     runner = ReverseReporter(**vars(args))
-    try:
-        runner.write_report()
-    finally:
-        runner.out_fh.close()
+    runner.write_report()
