@@ -23,6 +23,8 @@ class CovAnalyzer(object):
         if not coverage_files and not coverage_directory:
             raise ValueError("One of 'coverage_files' or " +
                              "'coverage_directory' args must be given.")
+        if coverage_files is None:
+            coverage_files = []
         self.logger = logging.getLogger("CovAnalyzer")
         self.logger.setLevel(logging.INFO)
         ch = logging.StreamHandler()
