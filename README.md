@@ -3,18 +3,40 @@
 **R**ar**e** **V**ariant **E**nrichment and **R**ecessive **Se**gregation
 
 ## Installation
-    
+ 
+### Method 1:
+
+ReVERSe requires several modules from VASE (https://github.com/david-a-parry/vase).
+First install VASE using pip (or for other methods look at the instructions in
+the README at the [VASE github repo](https://github.com/david-a-parry/vase)) 
+and then install ReVERSe from either the gitlab or github repo.
+
+    python3 -m pip install git+git://github.com/david-a-parry/vase.git --user
+    python3 -m pip install git+https://git.ecdf.ed.ac.uk/dparry/reverse.git  --user
+
+The --user flag is optional, but circumvents permissions issues that may arise
+depending on how your python libraries are configured.
+
+### Method 2:
+
+First clone the repo and install with dependancies.
+
     git clone https://git.ecdf.ed.ac.uk/dparry/reverse.git
     cd reverse
-    python3 -m pip install . --process-dependency-links
+    python3 -m pip install . --process-dependency-links --user
 
 If you get an error "no such option: --process-dependency-links" (with newer
-versions of pip) with the third command, the following should work:
+versions of pip) with the third command see method 3.
 
-    python3 -m pip install -r requirements.txt
-    python3 -m pip install .
+### Method 3:
 
-Remember to add the --user flag to pip commands if you get permissions errors.
+Note that the first two steps are not necssary if you've already run them while
+attempting Method 2.
+
+    git clone https://git.ecdf.ed.ac.uk/dparry/reverse.git
+    cd reverse
+    python3 -m pip install -r requirements.txt --user
+    python3 -m pip install . --user
 
 ## Synopsis
 
