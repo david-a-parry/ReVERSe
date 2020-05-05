@@ -540,6 +540,12 @@ def main(vcf_input, genomes=None, exomes=None, table_output=None,
         n += 1
         if n % progress_interval == 0:
             update_progress(n, record, log_progress)
+    fin = "Finished processing {:,} variants".format(n)
+    if log_progress:
+        logger.info(fin)
+    else:
+        sys.stderr.write("\n{}\n".format(fin))
+    global prog_string
     if out_fh is not sys.stdout:
         out_fh.close()
     if vcf_writer is not None:
