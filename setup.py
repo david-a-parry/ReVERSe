@@ -18,9 +18,9 @@ setup(
     extras_require={
         'MYGENEINFO': ['mygene'],
     },
-    scripts=["bin/ReVERSe_count.py",
-             "bin/ReVERSe_reporter.py",
-             "bin/ReVERSe_seg.py"],
+    scripts=["bin/ReVERSe_count",
+             "bin/ReVERSe_reporter",
+             "bin/ReVERSe_seg"],
     include_package_data=True,
     classifiers=[
         "Programming Language :: Python :: 3",

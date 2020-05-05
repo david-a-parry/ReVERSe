@@ -6,6 +6,14 @@
     
     git clone https://git.ecdf.ed.ac.uk/dparry/reverse.git
     cd reverse
-    python3 -m pip install -e . --process-dependency-links
+    python3 -m pip install . --process-dependency-links
+
+If you get an error "no such option: --process-dependency-links" (with newer
+versions of pip) with the third command, the following should work:
+
+    python3 -m pip install -r requirements.txt
+    python3 -m pip install .
+
+Remember to add the --user flag to pip commands if you get permissions errors.
 
 
