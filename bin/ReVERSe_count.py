@@ -144,7 +144,7 @@ def get_gnomad_pops(vcf):
             an_num = vreader.metadata['INFO'][an][-1]['Number']
             an_typ = vreader.metadata['INFO'][an][-1]['Type']
             if (ac_num == 'A' and ac_typ == 'Integer' and
-                    an_num == '1' and an_typ == 'Integer'):
+                    (an_num == '1' or an_num == 'A') and an_typ == 'Integer'):
                 pops.append(p)
     if not pops:
         raise RuntimeError("No gnomAD populations found for VCF input!")
