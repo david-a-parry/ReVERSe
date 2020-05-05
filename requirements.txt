@@ -1,1 +1,5 @@
 -e git+git://github.com/david-a-parry/vase.git#egg=vase-0.2.5
+pandas
+xlsxwriter
+requests
+biopython

@@ -49,11 +49,11 @@ def get_options():
                         reference genotypes at sites without a variant called
                         in gnomAD VCF files. See the ".tsv" files in the data/
                         directory for examples.''')
-    parser.add_argument("--gnomad_version", metavar='VERSION', default="3.0",
+    parser.add_argument("--gnomad_version", metavar='VERSION', default="2.1",
                         help='''gnomAD data version. This setting simply
                         chooses the default file used for sample counts per
                         population if --pop_counts is not set and exome/genome
-                        coverage data is being used.''')
+                        coverage data is being used. Default=2.1''')
     parser.add_argument("--exome_coverage_files", nargs='+', help='''One or
                         more coverage summary files for Exome cohorts. Coverage
                         files must be sorted, bgzip compressed and tabix

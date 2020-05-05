@@ -14,7 +14,7 @@ class CovAnalyzer(object):
 
     def __init__(self, coverage_files=[], coverage_directory=None,
                  dp_cutoff=10, pops_file=None, cohort="Exomes",
-                 gnomad_version='3.0', genders_file=None):
+                 gnomad_version='2.1', genders_file=None):
         """
             Find valid coverage files in coverage_directory and determine
             what coverage cutoff to use (bisect available coverage

@@ -26,6 +26,7 @@ Remember to add the --user flag to pip commands if you get permissions errors.
         -g gnomad.genomes.r2.1.1.sites.vcf.bgz \
         --exome_coverage_files gnomad.exomes.coverage.summary.tsv.bgz \
         --genome_coverage_files gnomad.genomes.coverage.summary.tsv.bgz \
+        --gnomad_version 2.1 \
         -v cohort_rev_counts.vcf.gz \
         -t cohort.rev_counts.txt.gz 
     
