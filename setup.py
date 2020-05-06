@@ -14,7 +14,7 @@ setup(
     download_url='https://github.com/david-a-parry/ReVERSe/archive/0.1.tar.gz',
     license='MIT',
     install_requires=['vase>=0.2.5', 'pandas', 'xlsxwriter', 'requests',
-                      'biopython'],
+                      'biopython', 'scipy'],
     extras_require={
         'MYGENEINFO': ['mygene'],
     },
