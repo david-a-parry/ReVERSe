@@ -38,6 +38,12 @@ attempting Method 2.
     python3 -m pip install -r requirements.txt --user
     python3 -m pip install . --user
 
+## Test
+
+If you want to test your installation run the test.sh shell script in the test
+directory. This should complete without errors and produce a CSV output file
+in test/test_output.
+
 ## Synopsis
 
     # Get counts from gnomAD data - make sure you are using the same genome 
