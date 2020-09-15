@@ -3,6 +3,7 @@ import sys
 import argparse
 import re
 import logging
+import pysam
 from collections import defaultdict
 from scipy.stats import fisher_exact
 from vase.vcf_reader import VcfReader
@@ -10,7 +11,6 @@ from vase.var_by_region import VarByRegion
 from vase.gnomad_filter import GnomadFilter
 from vase.sample_filter import GtFilter
 from vase.ped_file import PedFile
-from Bio import bgzf
 from ReVERSe.cov_analyzer import CovAnalyzer
 
 logger = logging.getLogger("ReVERSe")
@@ -144,7 +144,7 @@ def get_gnomad_pops(vcf):
             an_num = vreader.header.info[an].number
             an_typ = vreader.header.info[an].type
             if (ac_num == 'A' and ac_typ == 'Integer' and
-                    (an_num == '1' or an_num == 'A') and an_typ == 'Integer'):
+                    (an_num == 1 or an_num == 'A') and an_typ == 'Integer'):
                 pops.append(p)
     if not pops:
         raise RuntimeError("No gnomAD populations found for VCF input!")
@@ -225,7 +225,7 @@ def write_record(fh, record, results, pops):
                              g_columns], results[i][s:s+4]):
                 inf[f].append(r)
     record.add_info_fields(inf)
-    fh.write(str(record) + "\n")
+    fh.write(record.record)
 
 
 def write_vcf_header(vcf, pops):
@@ -233,24 +233,24 @@ def write_vcf_header(vcf, pops):
                                 string='"' + str.join(" ", sys.argv) + '"')
     inf = {'ReVERSe_cohort_alt':     {'Number': 'A', 'Type': 'Integer',
                                       'Description':
-                                      '"ALT allele counts in cohort"'},
+                                      'ALT allele counts in cohort'},
            'ReVERSe_cohort_non_alt': {'Number': 'A', 'Type': 'Integer',
                                       'Description':
-                                      '"non-ALT allele counts in cohort"'}}
+                                      'non-ALT allele counts in cohort'}}
     for p in pops + ['all']:
         for f in g_columns:
             ftype = 'Float' if f in ['P', 'OR'] else 'Integer'
             field_name = "ReVERSe_" + p + "_" + f
             if f == 'alt':
-                desc = '"ALT allele counts for {} populations"'.format(p)
+                desc = 'ALT allele counts for {} populations'.format(p)
             elif f == 'non_alt':
-                desc = '"non-ALT allele counts for {} populations"'.format(p)
+                desc = 'non-ALT allele counts for {} populations'.format(p)
             elif f == 'P':
-                desc = ('"Fisher\'s P-value for {} populations vs '.format(p) +
-                        'cohort"')
+                desc = ('Fisher\'s P-value for {} populations vs '.format(p) +
+                        'cohort')
             elif f == 'OR':
-                desc = ('"Odds ratio from Fisher\'s test for {} '.format(p) +
-                        'populations vs cohort"')
+                desc = ('Odds ratio from Fisher\'s test for {} '.format(p) +
+                        'populations vs cohort')
             inf[field_name] = {'Number': 'A', 'Type': ftype,
                                'Description': desc}
     for f, d in inf.items():
@@ -258,8 +258,8 @@ def write_vcf_header(vcf, pops):
 
 
 def update_progress(n, record, log=False):
-    n_prog_string = "{:,} variants processed, at {}:{}".format(n, record.CHROM,
-                                                               record.POS)
+    n_prog_string = "{:,} variants processed, at {}:{}".format(n, record.chrom,
+                                                               record.pos)
     global prog_string
     if log:
         logger.info(n_prog_string)
@@ -346,7 +346,7 @@ def process_variant(record, gnomad_filters, p_value, pops, gts, gt_filter,
         else:
             indvs = [x for x in gts]
         refs, alts = count_alleles(i, gts, gt_filter, indvs,
-                                   max_one_per_sample, record.CHROM,
+                                   max_one_per_sample, record.chrom,
                                    xx_samples, xy_samples, no_gender,
                                    count_no_calls=count_no_calls)
         alt_ref_counts.append([alts, refs])
@@ -356,8 +356,8 @@ def process_variant(record, gnomad_filters, p_value, pops, gts, gt_filter,
             continue
         covered = dict()
         if c in cov_analyzers:
-            covered = cov_analyzers[c].samples_at_site(record.CHROM,
-                                                       record.POS)
+            covered = cov_analyzers[c].samples_at_site(record.chrom,
+                                                       record.pos)
             if sum(covered.values()) == 0:
                 continue  # no population covered sufficiently - skip cohort
         overlapping = gnomad_filters[c].get_overlapping_records(record)
@@ -374,7 +374,7 @@ def process_variant(record, gnomad_filters, p_value, pops, gts, gt_filter,
                 ac, an = 0, 0
                 if not annot:  # no matching variant in gnomad VCF
                     if p in covered:
-                        xy_match = sex_chr_re.match(record.CHROM)
+                        xy_match = sex_chr_re.match(record.chrom)
                         if xy_match:
                             an = int(cov_analyzers[c].fraction_xy * covered[p])
                             if xy_match.group(2) == 'X':
@@ -395,7 +395,7 @@ def process_variant(record, gnomad_filters, p_value, pops, gts, gt_filter,
     for i in range(len(record.DECOMPOSED_ALLELES)):
         allele = record.DECOMPOSED_ALLELES[i]
         if allele.ALT == '*':
-            per_allele_results.append(['.'] * (4 * len(pop_ids) + 6))
+            per_allele_results.append([None] * (4 * len(pop_ids) + 6))
             continue
         alts, refs = alt_ref_counts[i]
         results = [allele.CHROM, allele.POS, record.id,  allele.REF,
@@ -412,7 +412,7 @@ def process_variant(record, gnomad_filters, p_value, pops, gts, gt_filter,
                 total_ac += ac
                 total_an += an
             else:
-                results.extend(['.'] * 4)
+                results.extend([None] * 4)
         odds, pval = fisher_exact([(alts, refs), (total_ac,
                                                   total_an-total_ac)],
                                   alternative='greater')
@@ -470,7 +470,6 @@ def main(vcf_input, genomes=None, exomes=None, table_output=None,
                  xy_samples]
     gt_filter = GtFilter(vcfreader, gq=gq, dp=dp, max_dp=max_dp, het_ab=het_ab,
                          hom_ab=hom_ab)
-    gt_fields = gt_filter.fields
     if bed is None:
         varstream = vcfreader
     else:
@@ -514,10 +513,10 @@ def main(vcf_input, genomes=None, exomes=None, table_output=None,
         cohort_pops[cohort] = sorted(list(these_pops))
     all_pops = sorted(set(p for x in cohort_pops.values() for p in x))
     if vcf_output is not None:
-        write_vcf_header(vcf_reader, all_pops)
+        write_vcf_header(vcfreader, all_pops)
         vcf_writer = pysam.VariantFile(vcf_output,
                                        mode='w',
-                                       header=vcf_reader.header)
+                                       header=vcfreader.header.header)
     header = ["#chrom", "pos", "id", "ref", "alt", "cases_alt", "cases_ref"]
     header.extend([x + "_alt\t" + x + "_ref\t" + x + "_p\t" + x + "_odds" for
                    x in all_pops + ['total']])

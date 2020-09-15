@@ -97,7 +97,7 @@ def main(args):
     write_vcf_header(vcfreader, assoc_segregator)
     vcf_writer = pysam.VariantFile(outfile,
                                    mode='w',
-                                   header=vcfreader.header)
+                                   header=vcfreader.header.header)
     any_or_all = any if args.allow_any_pop else all
     n, w = 0, 0
     assoc_alts = list()
@@ -127,8 +127,10 @@ def main(args):
                        vcf_writer, final=True)
     variant_cache.output_ready.clear()
     update_progress(n, w, record, args.log_progress)
-    if vcf_writer is not sys.stdout:
-        vcf_writer.close()
+    sys.stderr.write("\n" + "-" * len(prog_string) + "\n")
+    logger.info("Finished Processing Variants")
+    logger.info("{:,} variants processed, {:,} written".format(n, w))
+    vcf_writer.close()
 
 
 def process_cache(cache, assoc_alts, assoc_segregator, pval, min_alleles,
@@ -142,7 +144,7 @@ def process_cache(cache, assoc_alts, assoc_segregator, pval, min_alleles,
                                                                   final=final)
     for var in cache.output_ready:
         if var.can_output or var.var_id in var_id_to_seg:
-            outfh.write(str(var.record) + '\n')
+            outfh.write(var.record.record)
             written += 1
     return written
 
@@ -208,8 +210,8 @@ def is_assoc_hit(record, pval, min_alleles, assoc_fields, any_or_all=all):
         if (record.info['ReVERSe_cohort_alt'][i] is None or
                 record.info['ReVERSe_cohort_alt'][i] < min_alleles):
             continue
-        if any_or_all(info[f][i] is not None and info[f][i] <= pval for f in
-                      assoc_fields):
+        if any_or_all(record.info[f][i] is not None and
+                      record.info[f][i] <= pval for f in assoc_fields):
             allele_is_hit[i] = True
     return allele_is_hit
 
@@ -222,7 +224,7 @@ def set_true_if_true(a, b):
 
 def filter_on_existing_freq(record, freq, freq_fields):
     remove = [False] * len(record.alts)
-    for annot in freq_fields:
+    for annot in [x for x in freq_fields if x in record.info]:
         if record.info[annot] is None:
             continue
         for i in range(len(remove)):
@@ -287,29 +289,29 @@ def update_progress(n, w, record, log=False):
     prog_string = n_prog_string
 
 
-def write_vcf_header(vcf, fh, assoc_seg):
+def write_vcf_header(vcf, assoc_seg):
     vcf.header.add_header_field(name="ReVERSe_seg",
                                 string='"' + str.join(" ", sys.argv) + '"')
     inf = dict()
     for f in assoc_seg.header_fields:
         inf[f[0]] = {'Number': 'A', 'Type': 'String', 'Description': f[1]}
     h_flds = [("ReVERSe_phased_families",
-               '"Family IDs for ReVERSe_biallelic features where phase of ' +
+               'Family IDs for ReVERSe_biallelic features where phase of ' +
                'biallelics is known. Each family ID is separated by a pipe ' +
                'character, annotations per feature are separated by commas ' +
-               'in the same order as given by ReVERSe_biallelic_features."'),
+               'in the same order as given by ReVERSe_biallelic_features.'),
               ("ReVERSe_unphased_families",
-               '"Family IDs for ReVERSe_biallelic alleles where phase of ' +
+               'Family IDs for ReVERSe_biallelic alleles where phase of ' +
                'biallelics is unknown. Each family ID is separated by a ' +
                'pipe character, annotations per feature are separated by ' +
                'commas in the same order as given by ' +
-               'ReVERSe_biallelic_features."'),
+               'ReVERSe_biallelic_features.'),
               ("ReVERSe_carrier_families",
-               '"Family IDs for ReVERSe_biallelic features where families ' +
+               'Family IDs for ReVERSe_biallelic features where families ' +
                'have at least one carrier for a qualifying variant. Each ' +
                'family ID is separated by a pipe character, annotations per ' +
                'feature are separated by commas in the same order as given ' +
-               'by ReVERSe_biallelic_features."')]
+               'by ReVERSe_biallelic_features.')]
     for f in h_flds:
         inf[f[0]] = {'Number': '.', 'Type': 'String', 'Description': f[1]}
     for f, d in inf.items():
