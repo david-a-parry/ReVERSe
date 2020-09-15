@@ -5,7 +5,7 @@ import re
 import logging
 from collections import defaultdict
 from scipy.stats import fisher_exact
-from parse_vcf import VcfReader
+from vase.vcf_reader import VcfReader
 from vase.var_by_region import VarByRegion
 from vase.gnomad_filter import GnomadFilter
 from vase.sample_filter import GtFilter
@@ -134,15 +134,15 @@ def get_gnomad_pops(vcf):
     vreader = VcfReader(vcf)
     pop_ac_re = re.compile(r'''^AC_([A-Za-z]{3})$''')
     pops = []
-    for f in vreader.metadata['INFO']:
+    for f in vreader.header.info:
         match = pop_ac_re.match(f)
         if match:
             p = match.group(1)
             an = 'AN_' + p
-            ac_num = vreader.metadata['INFO'][f][-1]['Number']
-            ac_typ = vreader.metadata['INFO'][f][-1]['Type']
-            an_num = vreader.metadata['INFO'][an][-1]['Number']
-            an_typ = vreader.metadata['INFO'][an][-1]['Type']
+            ac_num = vreader.header.info[f].number
+            ac_typ = vreader.header.info[f].type
+            an_num = vreader.header.info[an].number
+            an_typ = vreader.header.info[an].type
             if (ac_num == 'A' and ac_typ == 'Integer' and
                     (an_num == '1' or an_num == 'A') and an_typ == 'Integer'):
                 pops.append(p)
@@ -158,7 +158,7 @@ def _one_individual_per_fam(gts, gt_filter, allele, families):
         calls).
 
         Args:
-            gts:    parsed_gts from VcfRecord
+            gts:    samples from VcfRecord
 
             gt_filter:
                     GtFilter from vase.sample_filter
@@ -175,7 +175,7 @@ def _one_individual_per_fam(gts, gt_filter, allele, families):
         elif not members:
             continue
         else:
-            a_counts = [gts['GT'][s].count(allele) if
+            a_counts = [gts[s]['GT'].count(allele) if
                         gt_filter.gt_is_ok(gts, s, allele) else -1 for s in
                         members]
             if all(a_counts) and any(x > 0 for x in a_counts):
@@ -216,7 +216,7 @@ def write_record(fh, record, results, pops):
                 appears in each result.
     '''
     inf = defaultdict(list)
-    for i in range(len(record.ALLELES)-1):
+    for i in range(len(record.alts)):
         inf['ReVERSe_cohort_alt'].append(results[i][0])
         inf['ReVERSe_cohort_non_alt'].append(results[i][1])
         for j in range(len(pops)):
@@ -228,7 +228,7 @@ def write_record(fh, record, results, pops):
     fh.write(str(record) + "\n")
 
 
-def write_vcf_header(vcf, fh, pops):
+def write_vcf_header(vcf, pops):
     vcf.header.add_header_field(name="ReVERSe",
                                 string='"' + str.join(" ", sys.argv) + '"')
     inf = {'ReVERSe_cohort_alt':     {'Number': 'A', 'Type': 'Integer',
@@ -255,7 +255,6 @@ def write_vcf_header(vcf, fh, pops):
                                'Description': desc}
     for f, d in inf.items():
         vcf.header.add_header_field(name=f, dictionary=d, field_type='INFO')
-    fh.write(str(vcf.header))
 
 
 def update_progress(n, record, log=False):
@@ -291,7 +290,7 @@ def chrom_check_from_gt(gt_filter, gts, s, i):
             i:          Index of alt allele to check.
     '''
     return (gt_filter.gt_is_ok(gts, s, i) and
-            gts['GT'][s] != (None,) * len(gts['GT'][s]))
+            gts[s]['GT'] != (None,) * len(gts[s]['GT']))
 
 
 def count_alleles(i, gts, gt_filter, indvs, max_one_per_sample, chromosome,
@@ -303,18 +302,18 @@ def count_alleles(i, gts, gt_filter, indvs, max_one_per_sample, chromosome,
     sex_match = sex_chr_re.match(chromosome)
     if max_one_per_sample:
         alts = sum(1 for s in indvs if gt_filter.gt_is_ok(gts, s, i)
-                   and i in gts['GT'][s])
+                   and i in gts[s]['GT'])
     elif sex_match:
         alts = sum(1 for s in no_gender if gt_filter.gt_is_ok(gts, s, i)
                    and i in gts['GT'][s])
         alts += sum(1 for s in xy_samples if gt_filter.gt_is_ok(gts, s, i)
-                    and i in gts['GT'][s])
+                    and i in gts[s]['GT'])
         if sex_match.group(2) == 'X':
-            alts += sum((gts['GT'][s].count(i)) for s in xx_samples if
-                        gt_filter.gt_is_ok(gts, s, i) and i in gts['GT'][s])
+            alts += sum((gts[s]['GT'].count(i)) for s in xx_samples if
+                        gt_filter.gt_is_ok(gts, s, i) and i in gts[s]['GT'])
     else:
-        alts = sum((gts['GT'][s].count(i)) for s in indvs if
-                   gt_filter.gt_is_ok(gts, s, i) and i in gts['GT'][s])
+        alts = sum((gts[s]['GT'].count(i)) for s in indvs if
+                   gt_filter.gt_is_ok(gts, s, i) and i in gts[s]['GT'])
     if sex_match:
         # TODO - rethink this fudge for samples without gender
         chroms = sum(2 for s in no_gender if chrom_check(gt_filter, gts, s, i))
@@ -338,14 +337,14 @@ def process_variant(record, gnomad_filters, p_value, pops, gts, gt_filter,
     alt_ref_counts = []
     if not pop_ids:
         pop_ids = sorted(set(p for x in pops.values() for p in x))
-    for i in range(1, len(record.ALLELES)):
-        if record.ALLELES[i] == '*':
+    for i in range(1, len(record.alleles)):
+        if record.alleles[i] == '*':
             alt_ref_counts.append([-1, -1])
             continue
         if families is not None:
             indvs = _one_individual_per_fam(gts, gt_filter, i, families)
         else:
-            indvs = [x for x in gts['GT']]
+            indvs = [x for x in gts]
         refs, alts = count_alleles(i, gts, gt_filter, indvs,
                                    max_one_per_sample, record.CHROM,
                                    xx_samples, xy_samples, no_gender,
@@ -399,7 +398,7 @@ def process_variant(record, gnomad_filters, p_value, pops, gts, gt_filter,
             per_allele_results.append(['.'] * (4 * len(pop_ids) + 6))
             continue
         alts, refs = alt_ref_counts[i]
-        results = [allele.CHROM, allele.POS, record.ID,  allele.REF,
+        results = [allele.CHROM, allele.POS, record.id,  allele.REF,
                    allele.ALT, alts, refs]
         all_pvals = []
         total_ac, total_an = 0, 0
@@ -515,22 +514,20 @@ def main(vcf_input, genomes=None, exomes=None, table_output=None,
         cohort_pops[cohort] = sorted(list(these_pops))
     all_pops = sorted(set(p for x in cohort_pops.values() for p in x))
     if vcf_output is not None:
-        if vcf_output.endswith(('.gz', '.bgz')):
-            vcf_writer = bgzf.BgzfWriter(vcf_output)
-        else:
-            vcf_writer = open(vcf_output, 'w')
-        write_vcf_header(vcfreader, vcf_writer, all_pops)
+        write_vcf_header(vcf_reader, all_pops)
+        vcf_writer = pysam.VariantFile(vcf_output,
+                                       mode='w',
+                                       header=vcf_reader.header)
     header = ["#chrom", "pos", "id", "ref", "alt", "cases_alt", "cases_ref"]
     header.extend([x + "_alt\t" + x + "_ref\t" + x + "_p\t" + x + "_odds" for
                    x in all_pops + ['total']])
     out_fh.write("\t".join(header) + "\n")
     n = 0
     for record in varstream:
-        gts = record.parsed_gts(fields=gt_fields, samples=samples)
         process_variant(record=record, gnomad_filters=gnomad_filters,
                         pops=cohort_pops, pop_ids=all_pops,
-                        cov_analyzers=cov_analyzers, gts=gts, table_out=out_fh,
-                        vcf_out=vcf_writer, p_value=p_value,
+                        cov_analyzers=cov_analyzers, gts=record.samples,
+                        table_out=out_fh, vcf_out=vcf_writer, p_value=p_value,
                         gt_filter=gt_filter,
                         families=families,
                         test_combined_pops=test_combined_pops,
