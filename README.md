@@ -50,7 +50,7 @@ in test/test_output.
     # build as the gnomAD VCF!
 
     ReVERSe_count -i cohort.vcf.gz \
-        -ped cohort.ped \
+        --ped cohort.ped \
         -e gnomad.exomes.r2.1.sites.vcf.gz \
         -g gnomad.genomes.r2.1.1.sites.vcf.bgz \
         --exome_coverage_files gnomad.exomes.coverage.summary.tsv.bgz \
