@@ -1,4 +1,4 @@
--e git+git://github.com/david-a-parry/vase.git#egg=vase-0.2.5
+-e git+git://github.com/david-a-parry/vase.git#egg=vase-0.4.1
 pandas
 xlsxwriter
 requests

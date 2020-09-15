@@ -3,12 +3,12 @@ import sys
 import argparse
 import re
 import logging
-from parse_vcf import VcfReader
+import pysam
+from vase.vcf_reader import VcfReader
 from vase.ped_file import PedFile
 from vase.vep_filter import VepFilter
 from vase.family_filter import FamilyFilter
 from vase.vase_runner import VariantCache
-from Bio import bgzf
 from ReVERSe.assoc_segregator import AssocSegregator
 
 logger = logging.getLogger("ReVERSe")
@@ -91,13 +91,14 @@ def main(args):
                               blacklist=args.feature_blacklist,
                               logging_level=logger.level)
     if args.output is None:
-        vcf_writer = sys.stdout
-    elif args.output.endswith(('.gz', '.bgz')):
-        vcf_writer = bgzf.BgzfWriter(args.output)
+        outfile = '-'
     else:
-        vcf_writer = open(args.output, 'w')
+        outfile = args.output
+    write_vcf_header(vcfreader, assoc_segregator)
+    vcf_writer = pysam.VariantFile(outfile,
+                                   mode='w',
+                                   header=vcfreader.header.header)
     any_or_all = any if args.allow_any_pop else all
-    write_vcf_header(vcfreader, vcf_writer, assoc_segregator)
     n, w = 0, 0
     assoc_alts = list()
     for record in vcfreader:
@@ -126,8 +127,10 @@ def main(args):
                        vcf_writer, final=True)
     variant_cache.output_ready.clear()
     update_progress(n, w, record, args.log_progress)
-    if vcf_writer is not sys.stdout:
-        vcf_writer.close()
+    sys.stderr.write("\n" + "-" * len(prog_string) + "\n")
+    logger.info("Finished Processing Variants")
+    logger.info("{:,} variants processed, {:,} written".format(n, w))
+    vcf_writer.close()
 
 
 def process_cache(cache, assoc_alts, assoc_segregator, pval, min_alleles,
@@ -141,7 +144,7 @@ def process_cache(cache, assoc_alts, assoc_segregator, pval, min_alleles,
                                                                   final=final)
     for var in cache.output_ready:
         if var.can_output or var.var_id in var_id_to_seg:
-            outfh.write(str(var.record) + '\n')
+            outfh.write(var.record.record)
             written += 1
     return written
 
@@ -149,9 +152,9 @@ def process_cache(cache, assoc_alts, assoc_segregator, pval, min_alleles,
 def process_record(record, variant_cache, pval, min_alleles, assoc_fields,
                    csq_filter, hit_vep_filter, assoc_segregator, freq,
                    freq_fields, any_or_all, allele_filters=[]):
-    remove_alleles = [False] * (len(record.ALLELES) - 1)
-    for i in range(1, len(record.ALLELES)):
-        if record.ALLELES[i] == '*':
+    remove_alleles = [False] * len(record.alts)
+    for i in range(1, len(record.alleles)):
+        if record.alleles[i] == '*':
             remove_alleles[i-1] = True
     if freq_fields and freq:
         r = filter_on_existing_freq(record, freq, freq_fields)
@@ -189,8 +192,8 @@ def process_record(record, variant_cache, pval, min_alleles, assoc_fields,
     if segs:
         variant_cache.add_record(record)
         for i in (x for x in range(len(is_hit)) if is_hit[x]):
-            alt_id = "{}:{}-{}/{}".format(record.CHROM, record.POS,
-                                          record.REF, record.ALLELES[i+1])
+            alt_id = "{}:{}-{}/{}".format(record.chrom, record.pos,
+                                          record.ref, record.alleles[i+1])
             assoc_alts.append(alt_id)
     else:
         variant_cache.check_record(record)
@@ -202,15 +205,13 @@ def is_assoc_hit(record, pval, min_alleles, assoc_fields, any_or_all=all):
         For each ALT allele check if they meet the requirement for an
         enrichment hit
     '''
-    allele_is_hit = [False] * (len(record.ALLELES) - 1)
-    info = record.parsed_info_fields(
-        fields=['ReVERSe_cohort_alt'] + assoc_fields)
-    for i in range(len(record.ALLELES) - 1):
-        if (info['ReVERSe_cohort_alt'][i] is None or
-                info['ReVERSe_cohort_alt'][i] < min_alleles):
+    allele_is_hit = [False] * len(record.alts)
+    for i in range(len(record.alts)):
+        if (record.info['ReVERSe_cohort_alt'][i] is None or
+                record.info['ReVERSe_cohort_alt'][i] < min_alleles):
             continue
-        if any_or_all(info[f][i] is not None and info[f][i] <= pval for f in
-                      assoc_fields):
+        if any_or_all(record.info[f][i] is not None and
+                      record.info[f][i] <= pval for f in assoc_fields):
             allele_is_hit[i] = True
     return allele_is_hit
 
@@ -222,36 +223,35 @@ def set_true_if_true(a, b):
 
 
 def filter_on_existing_freq(record, freq, freq_fields):
-    remove = [False] * (len(record.ALLELES) - 1)
-    parsed = record.parsed_info_fields(fields=freq_fields)
-    for annot in parsed:
-        if parsed[annot] is None:
+    remove = [False] * len(record.alts)
+    for annot in [x for x in freq_fields if x in record.info]:
+        if record.info[annot] is None:
             continue
         for i in range(len(remove)):
-            if parsed[annot][i] is not None:
-                if parsed[annot][i] >= freq:
+            if record.info[annot][i] is not None:
+                if record.info[annot][i] >= freq:
                     remove[i] = True
     return remove
 
 
 def filter_on_existing_cadd(record, score):
-    remove = [False] * (len(record.ALLELES) - 1)
-    phreds = record.parsed_info_fields(fields=['CADD_PHRED_score'])
+    remove = [False] * len(record.alts)
+    phreds = record.info['CADD_PHRED_score']
     if 'CADD_PHRED_score' in phreds:
         for i in range(len(remove)):
-            if (phreds['CADD_PHRED_score'][i] is not None and
-                    phreds['CADD_PHRED_score'][i] < score):
+            if (phreds[i] is not None and
+                    phreds[i] < score):
                 remove[i] = True
     return remove
 
 
 def get_vase_freq_annots(vcf):
     frqs = list()
-    for annot in vcf.metadata['INFO']:
+    for annot in vcf.header.info:
         match = re.search('^VASE_dbSNP|gnomAD(_\d+)?_(CAF|AF)(_\w+)?', annot)
         if match:
-            if (vcf.metadata['INFO'][annot][-1]['Number'] == 'A' and
-                    vcf.metadata['INFO'][annot][-1]['Type'] == 'Float'):
+            if (vcf.header.info[annot].number == 'A' and
+                    vcf.header.info[annot].type == 'Float'):
                 logger.info("Found previous allele frequency annotation " +
                             "'{}'".format(annot))
                 frqs.append(annot)
@@ -260,12 +260,12 @@ def get_vase_freq_annots(vcf):
 
 def get_assoc_fields(vcf):
     for f in ['ReVERSe_cohort_alt', 'ReVERSe_cohort_non_alt']:
-        if f not in vcf.metadata['INFO']:
+        if f not in vcf.header.info:
             sys.exit("Missing required annotation field '{}' in ".format(f) +
                      "VCF header. The ReVERSe_count.py script must be used to" +
                      " produce your input VCF before running this program.\n")
     annots = list()
-    for info in vcf.metadata['INFO']:
+    for info in vcf.header.info:
         match = re.search('^ReVERSe_\w+_P', info)
         if match:
             annots.append(info)
@@ -277,7 +277,7 @@ def get_assoc_fields(vcf):
 
 def update_progress(n, w, record, log=False):
     n_prog_string = ("{:,} variants processed, {:,} written ".format(n, w) +
-                     "at {}:{}".format(record.CHROM, record.POS))
+                     "at {}:{}".format(record.chrom, record.pos))
     global prog_string
     if log:
         logger.info(n_prog_string)
@@ -289,34 +289,33 @@ def update_progress(n, w, record, log=False):
     prog_string = n_prog_string
 
 
-def write_vcf_header(vcf, fh, assoc_seg):
+def write_vcf_header(vcf, assoc_seg):
     vcf.header.add_header_field(name="ReVERSe_seg",
                                 string='"' + str.join(" ", sys.argv) + '"')
     inf = dict()
     for f in assoc_seg.header_fields:
         inf[f[0]] = {'Number': 'A', 'Type': 'String', 'Description': f[1]}
     h_flds = [("ReVERSe_phased_families",
-               '"Family IDs for ReVERSe_biallelic features where phase of ' +
+               'Family IDs for ReVERSe_biallelic features where phase of ' +
                'biallelics is known. Each family ID is separated by a pipe ' +
                'character, annotations per feature are separated by commas ' +
-               'in the same order as given by ReVERSe_biallelic_features."'),
+               'in the same order as given by ReVERSe_biallelic_features.'),
               ("ReVERSe_unphased_families",
-               '"Family IDs for ReVERSe_biallelic alleles where phase of ' +
+               'Family IDs for ReVERSe_biallelic alleles where phase of ' +
                'biallelics is unknown. Each family ID is separated by a ' +
                'pipe character, annotations per feature are separated by ' +
                'commas in the same order as given by ' +
-               'ReVERSe_biallelic_features."'),
+               'ReVERSe_biallelic_features.'),
               ("ReVERSe_carrier_families",
-               '"Family IDs for ReVERSe_biallelic features where families ' +
+               'Family IDs for ReVERSe_biallelic features where families ' +
                'have at least one carrier for a qualifying variant. Each ' +
                'family ID is separated by a pipe character, annotations per ' +
                'feature are separated by commas in the same order as given ' +
-               'by ReVERSe_biallelic_features."')]
+               'by ReVERSe_biallelic_features.')]
     for f in h_flds:
         inf[f[0]] = {'Number': '.', 'Type': 'String', 'Description': f[1]}
     for f, d in inf.items():
         vcf.header.add_header_field(name=f, dictionary=d, field_type='INFO')
-    fh.write(str(vcf.header))
 
 
 def get_options():
