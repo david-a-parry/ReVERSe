@@ -28,19 +28,19 @@ class AssocSegregator(RecessiveFilter):
         self.prefix = "ReVERSe_biallelic"
         self.header_fields = [
             ("ReVERSe_biallelic_homozygous",
-             '"Samples that carry homozygous biallelic changes ' +
-             ' parsed by {}"' .format(type(self).__name__)),
+             'Samples that carry homozygous biallelic changes ' +
+             ' parsed by {}' .format(type(self).__name__)),
             ("ReVERSe_biallelic_compound_het",
-             '"Samples that carry compound heterozygous biallelic changes ' +
-             'parsed by {}"'.format(type(self).__name__)),
+             'Samples that carry compound heterozygous biallelic changes ' +
+             'parsed by {}'.format(type(self).__name__)),
             ("ReVERSe_biallelic_de_novo",
-             '"Samples that carry biallelic alleles that appear to have ' +
-             'arisen de novo"'),
+             'Samples that carry biallelic alleles that appear to have ' +
+             'arisen de novo'),
             ('ReVERSe_biallelic_families',
-             '"Family IDs for ReVERSe_biallelic alleles"'),
+             'Family IDs for ReVERSe_biallelic alleles'),
             ("ReVERSe_biallelic_features",
-             '"Features (e.g. transcripts) that contain qualifying ' +
-             'biallelic variants parsed by {}"' .format(
+             'Features (e.g. transcripts) that contain qualifying ' +
+             'biallelic variants parsed by {}' .format(
                  type(self).__name__))]
         self.annot_fields = ('homozygous', 'compound_het', 'de_novo',
                              'families', 'features')

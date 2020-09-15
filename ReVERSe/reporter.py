@@ -3,9 +3,10 @@ from collections import defaultdict
 from tempfile import NamedTemporaryFile
 import pandas as pd
 from vase.vase_reporter import VaseReporter
-from parse_vcf import VcfReader
+from vase.vcf_reader import VcfReader
 
 supported_formats = ['xlsx', 'csv', 'tsv']
+
 
 class ReverseReporter(VaseReporter):
     ''' Read a ReVERSe_seg annotated VCF and output summary data.'''
@@ -35,7 +36,7 @@ class ReverseReporter(VaseReporter):
                          custom_feat_annots=feat_annots, **kwargs)
 
     def _get_count_fields(self, vcf):
-        f = [x for x in vcf.metadata['INFO'] if 'ReVERSe' in x and 'biallelic'
+        f = [x for x in vcf.header.info if 'ReVERSe' in x and 'biallelic'
              not in x]
         if not f:
             raise ValueError("No recognised ReVERSe count fields identified " +
@@ -45,7 +46,7 @@ class ReverseReporter(VaseReporter):
 
     def _get_seg_fields(self):
         inheritance_fields = dict()
-        if 'ReVERSe_biallelic_families' in self.vcf.metadata['INFO']:
+        if 'ReVERSe_biallelic_families' in self.vcf.header.info:
             inheritance_fields['ReVERSe_biallelic_families'] = 'recessive'
             self.logger.info("Found ReVERSe biallelic annotations.")
         else:
@@ -102,7 +103,7 @@ class ReverseReporter(VaseReporter):
         second_hits = []
         n_second_hits = []
         self.p_cols = [x for x in df.columns if x.endswith('_P')]
-        df['Family'] = df.Family.astype(int)
+#        df['Family'] = df.Family.astype(int)
         for row in df.itertuples():
             gt = row.Affected_GT.split(":")[0].split("/")
             hit_2 = []

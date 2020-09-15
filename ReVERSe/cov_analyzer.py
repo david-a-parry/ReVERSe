@@ -61,6 +61,7 @@ class CovAnalyzer(object):
         # TODO check whether coverage files have chr prefix - currently we
         # assume that coverage files will match the input VCF
         # contig = contig.lstrip("chr")
+        # TODO use walking method to reduce tabix lookups and speed up
         for f, tbx in self.file_to_tbx.items():
             try:
                 for row in tbx.fetch(contig, pos - 1, pos):

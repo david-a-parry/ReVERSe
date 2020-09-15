@@ -6,14 +6,14 @@ except ImportError:
 setup(
     name="ReVERSe",
     packages=["ReVERSe"],
-    version="0.1",
+    version="0.2",
     description="Rare Variant Enrichment and Recessive Segregation",
     author="David A. Parry",
     author_email="david.parry@igmm.ed.ac.uk",
     url='https://github.com/david-a-parry/ReVERSe',
     download_url='https://github.com/david-a-parry/ReVERSe/archive/0.1.tar.gz',
     license='MIT',
-    install_requires=['vase>=0.2.5', 'pandas', 'xlsxwriter', 'requests',
+    install_requires=['vase>=0.4', 'pandas', 'xlsxwriter', 'requests',
                       'biopython', 'scipy'],
     extras_require={
         'MYGENEINFO': ['mygene'],
@@ -31,5 +31,5 @@ setup(
         "Topic :: Scientific/Engineering :: Bio-Informatics",
         ],
     dependency_links=[
-        'https://github.com/david-a-parry/vase/tarball/master#egg=vase-0.2.5'],
+        'https://github.com/david-a-parry/vase/tarball/master#egg=vase-0.4'],
 )
