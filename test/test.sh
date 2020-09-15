@@ -14,8 +14,8 @@ ReVERSe_count -i $VCF \
     --ped $PED \
     -e $DIR/test_gnomad_wes.vcf.gz \
     -g $DIR/test_gnomad_wgs.vcf.gz \
-    --exome_coverage_files test_wes_cov.tsv.gz \
-    --genome_coverage_files test_wgs_cov.tsv.gz \
+    --exome_coverage_files $DIR/test_wes_cov.tsv.gz \
+    --genome_coverage_files $DIR/test_wgs_cov.tsv.gz \
     --gnomad_version 2.1 \
     -v $PREFIX.rev_counts.vcf.gz \
     -t $PREFIX.rev_counts.txt.gz 
